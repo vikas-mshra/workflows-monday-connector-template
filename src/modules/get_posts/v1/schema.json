@@ -1,0 +1,28 @@
+{
+  "metadata": {
+    "workflows_module_schema_version": "1.0.0"
+  },
+  "fields": [
+    {
+      "id": "api_key",
+      "type": "string",
+      "label": "API Key",
+      "description": "Your API key for authentication with Monday.com",
+      "validation": {
+        "required": true
+      }
+    },
+    {
+      "id": "object_type",
+      "type": "string",
+      "label": "Object Type",
+      "description": "The type of object to get from Monday.com",
+      "validation": {
+        "required": true
+      }
+    }
+  ],
+  "ui_options": {
+    "ui_order": ["api_key", "object_type"]
+  }
+}
