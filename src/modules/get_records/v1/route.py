@@ -23,14 +23,14 @@ def execute():
         if not data.get("api_key"):
             raise ManagedError("Missing API key parameter")
 
-        if not data.get("container"):
-            raise ManagedError("Missing container parameter")
+        if not data.get("object_type"):
+            raise ManagedError("Missing object type parameter")
 
         if not data.get("identifier"):
             raise ManagedError("Missing identifier parameter")
 
         api_token = data.get("api_key")
-        container = data.get("container")
+        object_type = data.get("object_type")
         identifier = data.get("identifier")
 
         # Build the headers
@@ -40,10 +40,10 @@ def execute():
         }
 
         # Build the query based on the object type
-        if container and identifier:
+        if object_type and identifier:
             query = f"""
             query ($identifier: [ID!], $limit: Int) {{
-                {container}(ids: $identifier) {{
+                {object_type}(ids: $identifier) {{
                     id
                     name
                     items_page(limit: $limit) {{
@@ -118,8 +118,6 @@ def content():
 
         data = request.data
 
-        print(data)
-
         form_data = data.get("form_data", {})
         content_object_names = data.get("content_object_names", [])
 
@@ -136,7 +134,7 @@ def content():
         content_objects = []  # this is the list of content objects that will be returned to the frontend
 
         api_token = form_data.get("api_key")
-        container = form_data.get("container")
+        object_type = form_data.get("object_type")
 
         if not api_token:
             raise ManagedError("Missing API key parameter")
@@ -202,18 +200,18 @@ def content():
             raise ManagedError(f"Monday.com API error: {result['errors']}")
 
         for content_object_name in content_object_names:
-            if content_object_name == "containers":
+            if content_object_name == "object_types":
                 top_modules = result["data"].keys()
                 data = [{"value": module, "label": module} for module in top_modules]
 
                 content_objects.append(
-                    {"content_object_name": "containers", "data": data}
+                    {"content_object_name": "object_types", "data": data}
                 )
 
-            elif content_object_name == "identifiers" and container:
+            elif content_object_name == "identifiers" and object_type:
                 data = [
                     {"value": record["id"], "label": record["name"]}
-                    for record in result["data"][container]
+                    for record in result["data"][object_type]
                 ]
 
                 content_objects.append(

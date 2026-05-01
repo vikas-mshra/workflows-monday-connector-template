@@ -13,10 +13,10 @@
       }
     },
     {
-      "id": "container",
+      "id": "object_type",
       "type": "string",
-      "label": "Container",
-      "description": "The container from Monday.com",
+      "label": "Object Type",
+      "description": "Select the object type to get records for",
       "validation": {
         "required": true
       },
@@ -27,7 +27,7 @@
         "type": ["managed"],
         "content_objects": [
           {
-            "id": "containers"
+            "id": "object_types"
           }
         ]
       },
@@ -60,6 +60,6 @@
     }
   ],
   "ui_options": {
-    "ui_order": ["api_key", "container", "identifier"]
+    "ui_order": ["api_key", "object_type", "identifier"]
   }
 }
