@@ -13,16 +13,53 @@
       }
     },
     {
-      "id": "object_type",
+      "id": "container",
       "type": "string",
-      "label": "Object Type",
-      "description": "The type of object to get from Monday.com",
+      "label": "Container",
+      "description": "The container from Monday.com",
       "validation": {
         "required": true
+      },
+      "choices": {
+        "values": []
+      },
+      "content": {
+        "type": ["managed"],
+        "content_objects": [
+          {
+            "id": "containers"
+          }
+        ]
+      },
+      "ui_options": {
+        "ui_widget": "SelectWidget"
+      }
+    },
+    {
+      "id": "identifier",
+      "type": "string",
+      "label": "Identifier",
+      "description": "The identifier of the container you selected above",
+      "validation": {
+        "required": true
+      },
+      "choices": {
+        "values": []
+      },
+      "content": {
+        "type": ["managed"],
+        "content_objects": [
+          {
+            "id": "identifiers"
+          }
+        ]
+      },
+      "ui_options": {
+        "ui_widget": "SelectWidget"
       }
     }
   ],
   "ui_options": {
-    "ui_order": ["api_key", "object_type"]
+    "ui_order": ["api_key", "container", "identifier"]
   }
 }
