@@ -24,11 +24,9 @@ def execute():
 
         if not data.get("object_type"):
             raise ManagedError("Missing object type parameter")
-        
+
         if not data.get("records"):
             raise ManagedError("Missing information to create the records")
-
-#     'records': [{'board_name': 'test name', 'kind': 'public'}]
 
         api_token = data.get("api_key")
         object_type = data.get("object_type")
@@ -56,11 +54,13 @@ def execute():
                 kind = record.get("kind", "public")
 
                 if not board_name:
-                    results.append({
-                        "success": False,
-                        "error": "board_name is required",
-                        "record": record,
-                    })
+                    results.append(
+                        {
+                            "success": False,
+                            "error": "board_name is required",
+                            "record": record,
+                        }
+                    )
                     continue
 
                 response = requests.post(
@@ -75,19 +75,23 @@ def execute():
                 result = response.json()
 
                 if "errors" in result:
-                    results.append({
-                        "success": False,
-                        "error": result["errors"],
-                        "record": record,
-                    })
+                    results.append(
+                        {
+                            "success": False,
+                            "error": result["errors"],
+                            "record": record,
+                        }
+                    )
                 else:
                     created = result["data"]["create_board"]
-                    results.append({
-                        "success": True,
-                        "id": created["id"],
-                        "name": created["name"],
-                        "state": created["state"],
-                    })
+                    results.append(
+                        {
+                            "success": True,
+                            "id": created["id"],
+                            "name": created["name"],
+                            "state": created["state"],
+                        }
+                    )
         else:
             raise ManagedError(f"Unsupported object type: {object_type}")
 
@@ -198,7 +202,6 @@ def content():
                 content_objects.append(
                     {"content_object_name": "object_types", "data": data}
                 )
-
         return Response(data={"content_objects": content_objects})
 
     except ManagedError as e:
@@ -243,7 +246,7 @@ def schema():
         form_data = data.get("form_data", {})
         object_type = form_data.get("object_type")
         api_key = form_data.get("api_key")
-        
+
         print(form_data)
 
         response = Response(
@@ -263,31 +266,44 @@ def schema():
             boards_fields = [
                 {
                     "default": [{}],
-                    "description": "List of boards to create",
+                    "description": "List of records to update",
                     "id": "records",
                     "items": {
                         "default": {},
                         "fields": [
                             {
                                 "default": "",
-                                "description": "The name of the board",
-                                "id": "board_name",
-                                "label": "Board Name",
+                                "description": "The ID of the board to update",
+                                "id": "board_id",
+                                "label": "Board ID",
                                 "type": "string",
                                 "validation": {"required": True},
                             },
                             {
                                 "default": "",
-                                "description": "The kind of board",
+                                "description": "The name of the board to update",
+                                "id": "board_name",
+                                "label": "Board Name",
+                                "type": "string",
+                            },
+                            {
+                                "default": "",
+                                "description": "The kind of board to update",
                                 "id": "kind",
                                 "label": "Kind",
                                 "type": "string",
-                                "validation": {"required": True},
+                                "choices": {
+                                    "values": [
+                                        {"value": "public", "label": "Public"},
+                                        {"value": "private", "label": "Private"},
+                                    ]
+                                },
                             },
                         ],
                         "type": "object",
                         "ui_options": {
                             "ui_order": [
+                                "board_id",
                                 "board_name",
                                 "kind",
                             ]
