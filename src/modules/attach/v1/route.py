@@ -136,6 +136,8 @@ def execute():
                 f"record_{i}: {object_type}({', '.join(arg_strings)}) {selection}".strip()
             )
 
+        if not var_decls:
+            raise ManagedError(f"No arguments provided for {object_type}")
         mutation = f"mutation ({', '.join(var_decls)}) {{ {' '.join(alias_blocks)} }}"
 
         response = requests.post(

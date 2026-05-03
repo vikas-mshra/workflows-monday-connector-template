@@ -90,6 +90,8 @@ def execute():
                 f"record_{i}: {object_type}({', '.join(arg_strings)}) {selection}".strip()
             )
 
+        if not var_decls:
+            raise ManagedError(f"No arguments provided for {object_type}")
         gql_query = f"query ({', '.join(var_decls)}) {{ {' '.join(alias_blocks)} }}"
 
         response = requests.post(
