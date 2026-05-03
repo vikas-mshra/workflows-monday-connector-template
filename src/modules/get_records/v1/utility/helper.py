@@ -1,4 +1,4 @@
-from model import run_monday_query
+from model1 import run_monday_query
 
 SCALAR_TYPE_MAP = {
     "String": "string",
