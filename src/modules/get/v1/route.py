@@ -44,10 +44,33 @@ def execute():
         if not args:
             raise ManagedError(f"Unsupported object type: {object_type}")
 
-        # Strip NON_NULL wrapper to get the base return kind.
+        # Unwrap the return type to find the element type name (e.g. Board from [Board]).
+        # Then introspect that type's fields and select only scalar/enum ones.
+        # This avoids hardcoding { id name } and returns all flat fields instead.
         return_type = query_info["return_type"]
-        base_return_kind = (return_type.get("ofType") or return_type).get("kind")
-        selection = "" if base_return_kind in ("SCALAR", "ENUM") else "{ id name }"
+        rt = return_type
+        if rt.get("kind") == "NON_NULL":
+            rt = rt.get("ofType") or rt
+        if rt.get("kind") == "LIST":
+            rt = rt.get("ofType") or rt
+            if rt.get("kind") == "NON_NULL":
+                rt = rt.get("ofType") or rt
+
+        element_type = rt.get("name") if rt.get("kind") == "OBJECT" else None
+
+        if element_type:
+            type_result = run_monday_query(
+                query=f'{{ __type(name: "{element_type}") {{ fields {{ name type {{ kind ofType {{ kind }} }} }} }} }}',
+                token=api_key,
+            )
+            type_fields = ((type_result["data"].get("__type") or {}).get("fields")) or []
+            scalar_names = [
+                f["name"] for f in type_fields
+                if (f["type"].get("ofType") or f["type"]).get("kind") in ("SCALAR", "ENUM")
+            ]
+            selection = ("{ " + " ".join(scalar_names) + " }") if scalar_names else "{ id name }"
+        else:
+            selection = "" if rt.get("kind") in ("SCALAR", "ENUM") else "{ id name }"
 
         # Validate and build query vars in a single pass.
         var_decls = []
