@@ -3,7 +3,7 @@ from flask import request as flask_request
 import requests
 from main import router
 
-from model import get_mutation_args
+from model import get_mutation_args, run_monday_query
 from utility import build_schema_from_args, build_mutation_vars, humanize
 
 MONDAY_API_URL = "https://api.monday.com/v2"
@@ -132,11 +132,11 @@ def content():
         request = Request(flask_request)
 
         data = request.data
-        
+
         form_data = data.get("form_data", {})
         content_object_names = data.get("content_object_names", [])
 
-        # Extract content object names from objects if needed
+        # content_object_names may arrive as a list of id-objects; flatten to plain strings
         if (
             isinstance(content_object_names, list)
             and content_object_names
@@ -146,37 +146,24 @@ def content():
                 obj.get("id") for obj in content_object_names if "id" in obj
             ]
 
-        content_objects = []  # this is the list of content objects that will be returned to the frontend
-
         api_token = form_data.get("api_key")
 
         if not api_token:
             raise ManagedError("Missing API key parameter")
 
-        # Build the headers
-        headers = {
-            "Authorization": api_token,
-            "Content-Type": "application/json",
-        }
+        # Fetch all Mutation field names via introspection so we can derive the
+        # available object types without hardcoding them.
+        result = run_monday_query(
+            query='{ __type(name: "Mutation") { fields { name } } }',
+            token=api_token,
+        )
 
-        query = """
-            {
-                __type(name: "Mutation") {
-                    fields {
-                        name
-                    }
-                }
-            }
-        """
-        response = requests.post(MONDAY_API_URL, json={"query": query}, headers=headers)
-        response.raise_for_status()
-        result = response.json()
-
-        if "errors" in result:
-            raise ManagedError(f"Monday.com API error: {result['errors']}")
+        content_objects = []
 
         for content_object_name in content_object_names:
             if content_object_name == "object_types":
+                # Filter to create_* mutations and convert to value/label pairs.
+                # removeprefix ensures "create_column" → "column", not "olumn".
                 mutations = result["data"]["__type"]["fields"]
                 object_types = [
                     {
