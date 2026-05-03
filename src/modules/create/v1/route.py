@@ -4,7 +4,7 @@ import requests
 from main import router
 
 from src.monday_client import get_mutation_args, run_monday_query
-from utility import build_schema_from_args, build_mutation_vars, humanize
+from src.monday_schema import build_schema_from_args, build_mutation_vars, humanize
 
 MONDAY_API_URL = "https://api.monday.com/v2"
 

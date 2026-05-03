@@ -1,15 +1,17 @@
-import json
-import re
-
 from src.monday_client import run_monday_query
 
+# Maps Monday.com GraphQL scalar type names to Stacksync field type strings.
 SCALAR_TYPE_MAP = {
     "String": "string",
     "Boolean": "boolean",
     "ID": "integer",
+    "Int": "integer",
     "JSON": "string",
+    "ISO8601DateTime": "string",
 }
 
+# Extra UI hints keyed by Monday.com scalar type name.
+# JSON fields get a code editor widget so the user can enter structured data.
 SCALAR_UI_OPTIONS_MAP = {
     "JSON": {
         "ui_widget": "CodeblockWidget",
@@ -18,26 +20,34 @@ SCALAR_UI_OPTIONS_MAP = {
 }
 
 
-def humanize(name):
+def humanize(name: str) -> str:
+    """Converts a snake_case identifier to a Title Case human label."""
     return name.replace("_", " ").title()
 
 
-def _resolve_type(type_info):
-    """Returns (actual_kind, actual_name, required)."""
+def _resolve_type(type_info: dict) -> tuple:
+    """
+    Unwraps one level of NON_NULL and returns (kind, name, required).
+
+    GraphQL marks required args as NON_NULL(actualType). We peel that wrapper
+    so callers can work with the real kind/name while still knowing it's required.
+    """
     if type_info["kind"] == "NON_NULL":
         of_type = type_info.get("ofType") or {}
         return of_type.get("kind"), of_type.get("name"), True
     return type_info["kind"], type_info.get("name"), False
 
 
-def _enum_field(name, label, description, enum_name, required, token):
+def _enum_field(name, label, description, enum_name, required, token) -> dict:
+    """
+    Builds a SelectWidget field by fetching the enum's values via introspection.
+    Always queries the API so new enum members appear automatically.
+    """
     query = f"""
         query {{
             __type(name: "{enum_name}") {{
                 name
-                enumValues {{
-                    name
-                }}
+                enumValues {{ name }}
             }}
         }}
     """
@@ -59,7 +69,8 @@ def _enum_field(name, label, description, enum_name, required, token):
     }
 
 
-def _scalar_field(name, label, description, scalar_name, required):
+def _scalar_field(name, label, description, scalar_name, required) -> dict:
+    """Builds a plain input field for a GraphQL scalar arg."""
     field_type = SCALAR_TYPE_MAP.get(scalar_name, "string")
     field = {
         "id": name,
@@ -74,10 +85,9 @@ def _scalar_field(name, label, description, scalar_name, required):
     return field
 
 
-def _array_field(name, label, description, required):
+def _array_field(name, label, description, required) -> dict:
+    """Builds a repeatable list field for a GraphQL LIST arg."""
     item_name = name.rstrip("s")
-    item_label = humanize(item_name)
-    item_description = description.rstrip("s") if description else ""
     return {
         "id": name,
         "type": "array",
@@ -91,8 +101,8 @@ def _array_field(name, label, description, required):
                 {
                     "id": item_name,
                     "type": "string",
-                    "label": item_label,
-                    "description": item_description,
+                    "label": humanize(item_name),
+                    "description": description.rstrip("s") if description else "",
                     "validation": {"required": False},
                 }
             ],
@@ -102,11 +112,14 @@ def _array_field(name, label, description, required):
     }
 
 
-def _object_field(name, label, description, object_name, required, token):
-    # Introspect the INPUT_OBJECT type to discover its actual scalar fields,
-    # the same way _enum_field fetches enum values dynamically.
-    # This handles all input types (PaginationInput, ItemsQuery, WorkspacesQueryInput, etc.)
-    # without any hardcoding.
+def _object_field(name, label, description, object_name, required, token) -> dict:
+    """
+    Builds a grouped object field for a GraphQL INPUT_OBJECT arg.
+
+    Introspects the input type's fields dynamically so this works for any
+    INPUT_OBJECT without hardcoding — PaginationInput, ItemsQuery, etc.
+    Only flat SCALAR sub-fields are rendered; nested objects/enums are skipped.
+    """
     query = f"""
         query {{
             __type(name: "{object_name}") {{
@@ -131,13 +144,11 @@ def _object_field(name, label, description, object_name, required, token):
         f_name = f["name"]
         f_kind, f_scalar_name, f_required = _resolve_type(f["type"])
         if f_kind != "SCALAR":
-            # Skip nested objects/enums — only render flat scalar inputs
             continue
-        field_type = SCALAR_TYPE_MAP.get(f_scalar_name, "string")
         fields.append(
             {
                 "id": f_name,
-                "type": field_type,
+                "type": SCALAR_TYPE_MAP.get(f_scalar_name, "string"),
                 "label": humanize(f_name),
                 "description": f.get("description", ""),
                 "validation": {"required": f_required},
@@ -156,57 +167,13 @@ def _object_field(name, label, description, object_name, required, token):
     }
 
 
-def _gql_type_string(type_info):
-    """Recursively converts introspection type info to a GQL declaration string."""
-    if type_info["kind"] == "NON_NULL":
-        return _gql_type_string(type_info["ofType"]) + "!"
-    if type_info["kind"] == "LIST":
-        return f"[{_gql_type_string(type_info['ofType'])}]"
-    return type_info["name"]
+def build_schema_from_args(args: list, token: str) -> tuple:
+    """
+    Converts a list of GraphQL arg definitions (from introspection) into
+    Stacksync form field definitions and a ui_order list.
 
-
-def build_query_vars(args, record, index):
-    s = str(index)
-    var_decls, arg_strings, variables, missing_required = [], [], {}, []
-    for arg in args:
-        name = arg["name"]
-        actual_kind, actual_name, required = _resolve_type(arg["type"])
-        var_name = f"{name}_{s}"
-        gql_type = _gql_type_string(arg["type"])
-        if actual_kind == "LIST":
-            item_key = name.rstrip("s")
-            ids = [
-                str(item[item_key])
-                for item in (record.get(name) or [])
-                if item.get(item_key)
-            ]
-            if not ids:
-                if required:
-                    missing_required.append(name)
-                continue
-            var_decls.append(f"${var_name}: {gql_type}")
-            variables[var_name] = ids
-            arg_strings.append(f"{name}: ${var_name}")
-        else:
-            value = record.get(name)
-            if value is None:
-                if required:
-                    missing_required.append(name)
-                continue
-            if actual_kind == "SCALAR" and actual_name == "JSON":
-                if isinstance(value, dict):
-                    value = json.dumps(value)
-                elif isinstance(value, str):
-                    cleaned = re.sub(r",\s*([}\]])", r"\1", value)
-                    json.loads(cleaned)
-                    value = cleaned
-            var_decls.append(f"${var_name}: {gql_type}")
-            variables[var_name] = value
-            arg_strings.append(f"{name}: ${var_name}")
-    return var_decls, arg_strings, variables, missing_required
-
-
-def build_schema_from_args(args, token):
+    Returns (fields, ui_order) ready to drop into a schema response.
+    """
     schema = []
     ui_order = []
     for arg in args:

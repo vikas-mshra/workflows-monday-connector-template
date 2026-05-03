@@ -2,7 +2,7 @@ import requests
 from flask import request as flask_request
 from main import router
 from src.monday_client import get_mutation_args, run_monday_query
-from utility import build_mutation_vars, build_schema_from_args, humanize
+from src.monday_schema import build_mutation_vars, build_schema_from_args, humanize
 from workflows_cdk import ManagedError, Request, Response
 
 MONDAY_API_URL = "https://api.monday.com/v2"
