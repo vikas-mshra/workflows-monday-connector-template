@@ -23,15 +23,17 @@
       "on_action": {
         "load_schema": true
       },
-      "choices": [
-        { "value": "create_board", "label": "Board" },
-        { "value": "create_item", "label": "Item" },
-        { "value": "create_subitem", "label": "Subitem" },
-        { "value": "create_update", "label": "Update" },
-        { "value": "create_workspace", "label": "Workspace" },
-        { "value": "create_folder", "label": "Folder" },
-        { "value": "create_group", "label": "Group" }
-      ],
+      "choices": {
+        "values": []
+      },
+      "content": {
+        "type": ["managed"],
+        "content_objects": [
+          {
+            "id": "object_types"
+          }
+        ]
+      },
       "ui_options": {
         "ui_widget": "SelectWidget"
       }

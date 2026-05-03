@@ -51,7 +51,13 @@ def execute():
         for record in records:
             _, _, _, missing = build_mutation_vars(args, record, 0)
             if missing:
-                results.append({"success": False, "error": f"{missing[0]} is required", "record": record})
+                results.append(
+                    {
+                        "success": False,
+                        "error": f"{missing[0]} is required",
+                        "record": record,
+                    }
+                )
             else:
                 valid.append(record)
 
@@ -63,14 +69,18 @@ def execute():
             # Build a single batched mutation using aliases (record_0, record_1, …)
             # so all valid records are created in one HTTP round-trip.
             for i, record in enumerate(valid):
-                rec_var_decls, arg_strings, rec_variables, _ = build_mutation_vars(args, record, i)
+                rec_var_decls, arg_strings, rec_variables, _ = build_mutation_vars(
+                    args, record, i
+                )
                 var_decls.extend(rec_var_decls)
                 variables.update(rec_variables)
                 alias_blocks.append(
                     f"record_{i}: {object_type}({', '.join(arg_strings)}) {{ id name }}"
                 )
 
-            mutation = f"mutation ({', '.join(var_decls)}) {{ {' '.join(alias_blocks)} }}"
+            mutation = (
+                f"mutation ({', '.join(var_decls)}) {{ {' '.join(alias_blocks)} }}"
+            )
 
             response = requests.post(
                 MONDAY_API_URL,
@@ -83,7 +93,13 @@ def execute():
             if "errors" in api_result:
                 # Top-level errors mean the entire batch failed
                 for record in valid:
-                    results.append({"success": False, "error": api_result["errors"], "record": record})
+                    results.append(
+                        {
+                            "success": False,
+                            "error": api_result["errors"],
+                            "record": record,
+                        }
+                    )
             else:
                 # Map each aliased result back to its original record by index
                 for i, record in enumerate(valid):
@@ -91,7 +107,13 @@ def execute():
                     if created:
                         results.append({"success": True, **created})
                     else:
-                        results.append({"success": False, "error": "No data returned", "record": record})
+                        results.append(
+                            {
+                                "success": False,
+                                "error": "No data returned",
+                                "record": record,
+                            }
+                        )
 
         successful = sum(1 for r in results if r["success"])
         return Response(
@@ -110,7 +132,7 @@ def content():
         request = Request(flask_request)
 
         data = request.data
-
+        
         form_data = data.get("form_data", {})
         content_object_names = data.get("content_object_names", [])
 
@@ -127,7 +149,6 @@ def content():
         content_objects = []  # this is the list of content objects that will be returned to the frontend
 
         api_token = form_data.get("api_key")
-        # object_type = form_data.get("object_type")
 
         if not api_token:
             raise ManagedError("Missing API key parameter")
@@ -140,48 +161,10 @@ def content():
 
         query = """
             {
-                boards(limit: 10) {
-                    id
-                    name
-                    state
-                    workspace_id
-                }
-
-                workspaces(limit: 10) {
-                    id
-                    name
-                    kind
-                }
-
-                users(limit: 10) {
-                    id
-                    name
-                    email
-                }
-
-                teams {
-                    id
-                    name
-                }
-
-                tags {
-                    id
-                    name
-                }
-
-                docs(limit: 10) {
-                    id
-                    name
-                }
-
-                folders(limit: 10) {
-                    id
-                    name
-                }
-
-                account {
-                    id
-                    name
+                __type(name: "Mutation") {
+                    fields {
+                        name
+                    }
                 }
             }
         """
@@ -194,11 +177,17 @@ def content():
 
         for content_object_name in content_object_names:
             if content_object_name == "object_types":
-                top_modules = result["data"].keys()
-                data = [{"value": module, "label": module} for module in top_modules]
-
+                mutations = result["data"]["__type"]["fields"]
+                object_types = [
+                    {
+                        "value": mutation["name"],
+                        "label": humanize(mutation["name"].removeprefix("create_")),
+                    }
+                    for mutation in mutations
+                    if mutation["name"].startswith("create_")
+                ]
                 content_objects.append(
-                    {"content_object_name": "object_types", "data": data}
+                    {"content_object_name": "object_types", "data": object_types}
                 )
 
         return Response(data={"content_objects": content_objects})
@@ -225,15 +214,11 @@ BASE_FIELDS = [
         "description": "Select the object type to reveal its specific fields",
         "validation": {"required": True},
         "on_action": {"load_schema": True},
-        "choices": [
-            {"value": "create_board", "label": "Board"},
-            {"value": "create_item", "label": "Item"},
-            {"value": "create_subitem", "label": "Subitem"},
-            {"value": "create_update", "label": "Update"},
-            {"value": "create_workspace", "label": "Workspace"},
-            {"value": "create_folder", "label": "Folder"},
-            {"value": "create_group", "label": "Group"},
-        ],
+        "choices": {"values": []},
+        "content": {
+            "type": ["managed"],
+            "content_objects": [{"id": "object_types"}],
+        },
         "ui_options": {"ui_widget": "SelectWidget"},
     },
 ]
