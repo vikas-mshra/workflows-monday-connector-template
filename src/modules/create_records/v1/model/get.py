@@ -24,3 +24,40 @@ def run_monday_query(query: str, token: str, variables: dict = None):
         raise ManagedError(f"Monday.com API error: {result['errors']}")
 
     return result
+
+
+def get_mutation_args(object_type: str, token: str) -> list:
+    query = """
+        query {
+            __type(name: "Mutation") {
+                fields {
+                    name
+                    args {
+                        name
+                        description
+                        type {
+                            name
+                            kind
+                            ofType {
+                                name
+                                kind
+                                ofType {
+                                    name
+                                    kind
+                                    ofType {
+                                        name
+                                        kind
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    """
+    result = run_monday_query(query=query, token=token)
+    for field in result["data"]["__type"]["fields"]:
+        if field["name"] == object_type:
+            return field["args"]
+    return []

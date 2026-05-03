@@ -1,3 +1,6 @@
+import json
+import re
+
 from model import run_monday_query
 
 SCALAR_TYPE_MAP = {
@@ -131,6 +134,71 @@ def _object_field(name, label, description, required):
         "ui_options": {"ui_order": ["preset_type", "singular", "plural"]},
         "validation": {"required": required},
     }
+
+
+def _gql_type_string(type_info):
+    """Recursively converts introspection type info to a GQL declaration string."""
+    if type_info["kind"] == "NON_NULL":
+        return _gql_type_string(type_info["ofType"]) + "!"
+    if type_info["kind"] == "LIST":
+        return f"[{_gql_type_string(type_info['ofType'])}]"
+    return type_info["name"]
+
+
+def build_mutation_vars(args, record, index):
+    """
+    For one record at position `index`, walks the introspection args and returns
+    (var_decls, arg_strings, variables, missing_required) ready to splice into a
+    batch mutation.
+    """
+    s = str(index)
+    var_decls = []
+    arg_strings = []
+    variables = {}
+    missing_required = []
+
+    for arg in args:
+        name = arg["name"]
+        actual_kind, actual_name, required = _resolve_type(arg["type"])
+        var_name = f"{name}_{s}"
+        gql_type = _gql_type_string(arg["type"])
+
+        if actual_kind == "LIST":
+            item_key = name.rstrip("s")
+            ids = [
+                str(item[item_key])
+                for item in (record.get(name) or [])
+                if item.get(item_key)
+            ]
+            if not ids:
+                if required:
+                    missing_required.append(name)
+                continue
+            var_decls.append(f"${var_name}: {gql_type}")
+            variables[var_name] = ids
+            arg_strings.append(f"{name}: ${var_name}")
+        else:
+            value = record.get(name)
+            if value is None:
+                if required:
+                    missing_required.append(name)
+                continue
+            # Monday.com's JSON scalar expects a JSON string (not a parsed object).
+            # - If the value is a dict (e.g. sent as an object from the form), stringify it.
+            # - If it's already a string (from the CodeblockWidget), strip trailing commas
+            #   and validate it's well-formed before passing through.
+            if actual_kind == "SCALAR" and actual_name == "JSON":
+                if isinstance(value, dict):
+                    value = json.dumps(value)
+                elif isinstance(value, str):
+                    cleaned = re.sub(r",\s*([}\]])", r"\1", value)
+                    json.loads(cleaned)  # validate only; raise on malformed JSON
+                    value = cleaned
+            var_decls.append(f"${var_name}: {gql_type}")
+            variables[var_name] = value
+            arg_strings.append(f"{name}: ${var_name}")
+
+    return var_decls, arg_strings, variables, missing_required
 
 
 def build_schema_from_args(args, token):

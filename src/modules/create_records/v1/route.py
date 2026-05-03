@@ -3,8 +3,8 @@ from flask import request as flask_request
 import requests
 from main import router
 
-from model import run_monday_query
-from utility import build_schema_from_args, humanize
+from model import get_mutation_args
+from utility import build_schema_from_args, build_mutation_vars, humanize
 
 MONDAY_API_URL = "https://api.monday.com/v2"
 
@@ -33,132 +33,65 @@ def execute():
             "Content-Type": "application/json",
         }
 
-        results = []
+        # Records are keyed by object_type in the payload (e.g. "create_board": [...])
         records = data.get(object_type)
         if not records:
             raise ManagedError("Missing records parameter")
 
-        if object_type == "create_board":
-            valid = []
-            for record in records:
-                if not record.get("board_name"):
-                    results.append(
-                        {
-                            "success": False,
-                            "error": "board_name is required",
-                            "record": record,
-                        }
-                    )
-                elif not record.get("board_kind"):
-                    results.append(
-                        {
-                            "success": False,
-                            "error": "board_kind is required",
-                            "record": record,
-                        }
-                    )
-                else:
-                    valid.append(record)
-
-            if valid:
-                var_decls = []
-                alias_blocks = []
-                variables = {}
-
-                for i, record in enumerate(valid):
-                    s = str(i)
-
-                    var_decls += [
-                        f"$board_name_{s}: String!",
-                        f"$board_kind_{s}: BoardKind!",
-                    ]
-                    variables[f"board_name_{s}"] = record["board_name"]
-                    variables[f"board_kind_{s}"] = record["board_kind"]
-                    args = [
-                        f"board_name: $board_name_{s}",
-                        f"board_kind: $board_kind_{s}",
-                    ]
-
-                    for field, gql_type in [
-                        ("folder_id", "ID"),
-                        ("workspace_id", "ID"),
-                        ("template_id", "Int"),
-                        ("description", "String"),
-                        ("empty", "Boolean"),
-                    ]:
-                        if record.get(field) is not None:
-                            var_decls.append(f"${field}_{s}: {gql_type}")
-                            variables[f"{field}_{s}"] = record[field]
-                            args.append(f"{field}: ${field}_{s}")
-
-                    if record.get("item_nickname"):
-                        var_decls.append(f"$item_nickname_{s}: ItemNicknameInput")
-                        variables[f"item_nickname_{s}"] = record["item_nickname"]
-                        args.append(f"item_nickname: $item_nickname_{s}")
-
-                    for field, item_key in [
-                        ("board_owner_ids", "board_owner_id"),
-                        ("board_owner_team_ids", "board_owner_team_id"),
-                        ("board_subscriber_ids", "board_subscriber_id"),
-                        ("board_subscriber_teams_ids", "board_subscriber_teams_id"),
-                    ]:
-                        ids = [
-                            str(item[item_key])
-                            for item in (record.get(field) or [])
-                            if item.get(item_key)
-                        ]
-                        if ids:
-                            var_decls.append(f"${field}_{s}: [ID!]")
-                            variables[f"{field}_{s}"] = ids
-                            args.append(f"{field}: ${field}_{s}")
-
-                    alias_blocks.append(
-                        f"board_{i}: create_board({', '.join(args)}) {{ id name state }}"
-                    )
-
-                mutation = (
-                    f"mutation ({', '.join(var_decls)}) {{ {' '.join(alias_blocks)} }}"
-                )
-
-                response = requests.post(
-                    MONDAY_API_URL,
-                    json={"query": mutation, "variables": variables},
-                    headers=headers,
-                )
-                response.raise_for_status()
-                api_result = response.json()
-
-                if "errors" in api_result:
-                    for record in valid:
-                        results.append(
-                            {
-                                "success": False,
-                                "error": api_result["errors"],
-                                "record": record,
-                            }
-                        )
-                else:
-                    for i, record in enumerate(valid):
-                        created = api_result["data"].get(f"board_{i}")
-                        if created:
-                            results.append(
-                                {
-                                    "success": True,
-                                    "id": created["id"],
-                                    "name": created["name"],
-                                    "state": created["state"],
-                                }
-                            )
-                        else:
-                            results.append(
-                                {
-                                    "success": False,
-                                    "error": "No data returned",
-                                    "record": record,
-                                }
-                            )
-        else:
+        # Fetch the GraphQL argument definitions for this mutation via introspection.
+        # This drives both validation and dynamic mutation building below.
+        args = get_mutation_args(object_type, api_token)
+        if not args:
             raise ManagedError(f"Unsupported object type: {object_type}")
+
+        # Pre-validate each record against the required args.
+        # Invalid records are added to results immediately; valid ones are batched.
+        results = []
+        valid = []
+        for record in records:
+            _, _, _, missing = build_mutation_vars(args, record, 0)
+            if missing:
+                results.append({"success": False, "error": f"{missing[0]} is required", "record": record})
+            else:
+                valid.append(record)
+
+        if valid:
+            var_decls = []
+            alias_blocks = []
+            variables = {}
+
+            # Build a single batched mutation using aliases (record_0, record_1, …)
+            # so all valid records are created in one HTTP round-trip.
+            for i, record in enumerate(valid):
+                rec_var_decls, arg_strings, rec_variables, _ = build_mutation_vars(args, record, i)
+                var_decls.extend(rec_var_decls)
+                variables.update(rec_variables)
+                alias_blocks.append(
+                    f"record_{i}: {object_type}({', '.join(arg_strings)}) {{ id name }}"
+                )
+
+            mutation = f"mutation ({', '.join(var_decls)}) {{ {' '.join(alias_blocks)} }}"
+
+            response = requests.post(
+                MONDAY_API_URL,
+                json={"query": mutation, "variables": variables},
+                headers=headers,
+            )
+            response.raise_for_status()
+            api_result = response.json()
+
+            if "errors" in api_result:
+                # Top-level errors mean the entire batch failed
+                for record in valid:
+                    results.append({"success": False, "error": api_result["errors"], "record": record})
+            else:
+                # Map each aliased result back to its original record by index
+                for i, record in enumerate(valid):
+                    created = api_result["data"].get(f"record_{i}")
+                    if created:
+                        results.append({"success": True, **created})
+                    else:
+                        results.append({"success": False, "error": "No data returned", "record": record})
 
         successful = sum(1 for r in results if r["success"])
         return Response(
@@ -317,6 +250,9 @@ def schema():
         object_type = form_data.get("object_type")
         api_key = form_data.get("api_key")
 
+        # Base schema: just the api_key + object_type selector fields.
+        # Returned immediately if the user hasn't filled in the api_key or
+        # hasn't selected an object_type yet.
         response = Response(
             data={
                 "schema": {
@@ -327,75 +263,41 @@ def schema():
             }
         )
 
-        if not api_key:
+        if not api_key or not object_type:
             return response
 
-        # fetch the schema for the object type
-        query = """
-            query {
-                __type(name: "Mutation") {
-                    fields {
-                    name
-                    args {
-                        name
-                        type {
-                        name
-                        kind
-                        ofType {
-                            name
-                            kind
-                        }
-                        }
-                        description
-                    }
-                    }
-                }
-            }
-        """
-        # 1. Run the query to get the mutation fields
-        result = run_monday_query(query=query, token=api_key)
+        # Use GraphQL introspection to discover the args for the selected mutation.
+        # build_schema_from_args converts each arg into a form field definition,
+        # fetching enum values from the API where needed.
+        args = get_mutation_args(object_type, api_key)
+        fields, ui_order = build_schema_from_args(args, api_key)
 
-        # 2. Extract mutation fields
-        fields = result["data"]["__type"]["fields"]
-
-        # 3. Find create_board
-        create_fields_args = []
-        for field in fields:
-            if field["name"] == object_type:
-                create_fields_args = field["args"]
-                break
-
-        fields, ui_order = build_schema_from_args(create_fields_args, api_key)
-
-        schema = [
-            {
-                "id": object_type,
-                "type": "array",
-                "label": f"{humanize(object_type)} Records",
-                "description": f"List of {humanize(object_type)} to create",
-                "default": [{}],
-                "items": {
-                    "type": "object",
-                    "default": {},
-                    "fields": fields,
-                    "ui_options": {"ui_order": ui_order},
-                },
-            }
-        ]
+        # Wrap the generated fields in an array field so the user can create
+        # multiple records in one workflow execution.
         return Response(
             data={
                 "schema": {
                     "metadata": BASE_METADATA,
                     "fields": [
                         *BASE_FIELDS,
-                        *schema,
+                        {
+                            "id": object_type,
+                            "type": "array",
+                            "label": f"{humanize(object_type)} Records",
+                            "description": f"List of {humanize(object_type)} to create",
+                            "default": [{}],
+                            "items": {
+                                "type": "object",
+                                "default": {},
+                                "fields": fields,
+                                "ui_options": {"ui_order": ui_order},
+                            },
+                        },
                     ],
                     "ui_options": {"ui_order": ["api_key", "object_type", object_type]},
                 }
             }
         )
-
-        return response
     except ManagedError as e:
         return Response.error(str(e))
     except Exception as e:
