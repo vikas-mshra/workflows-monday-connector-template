@@ -4,6 +4,14 @@ SCALAR_TYPE_MAP = {
     "String": "string",
     "Boolean": "boolean",
     "ID": "integer",
+    "JSON": "string",
+}
+
+SCALAR_UI_OPTIONS_MAP = {
+    "JSON": {
+        "ui_widget": "CodeblockWidget",
+        "ui_options": {"language": "json"},
+    },
 }
 
 
@@ -50,13 +58,17 @@ def _enum_field(name, label, description, enum_name, required, token):
 
 def _scalar_field(name, label, description, scalar_name, required):
     field_type = SCALAR_TYPE_MAP.get(scalar_name, "string")
-    return {
+    field = {
         "id": name,
         "type": field_type,
         "label": label,
         "description": description,
         "validation": {"required": required},
     }
+    ui_options = SCALAR_UI_OPTIONS_MAP.get(scalar_name)
+    if ui_options:
+        field["ui_options"] = ui_options
+    return field
 
 
 def _array_field(name, label, description, required):
