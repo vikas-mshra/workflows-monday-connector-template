@@ -102,36 +102,52 @@ def _array_field(name, label, description, required):
     }
 
 
-def _object_field(name, label, description, required):
+def _object_field(name, label, description, object_name, required, token):
+    query = f"""
+        query {{
+            __type(name: "{object_name}") {{
+                inputFields {{
+                    name
+                    description
+                    type {{
+                        name
+                        kind
+                        ofType {{ name kind }}
+                    }}
+                }}
+            }}
+        }}
+    """
+    result = run_monday_query(query=query, token=token)
+    input_fields = (result["data"]["__type"] or {}).get("inputFields") or []
+    
+    fields = []
+    ui_order = []
+    for f in input_fields:
+        f_name = f["name"]
+        f_kind, f_scalar_name, f_required = _resolve_type(f["type"])
+        if f_kind != "SCALAR":
+            # Skip nested objects/enums — only render flat scalar inputs
+            continue
+        field_type = SCALAR_TYPE_MAP.get(f_scalar_name, "string")
+        fields.append(
+            {
+                "id": f_name,
+                "type": field_type,
+                "label": humanize(f_name),
+                "description": f.get("description", ""),
+                "validation": {"required": f_required},
+            }
+        )
+        ui_order.append(f_name)
+
     return {
         "id": name,
         "type": "object",
         "label": label,
         "description": description,
-        "fields": [
-            {
-                "id": "preset_type",
-                "type": "string",
-                "label": "Preset Type",
-                "description": "The preset type for item nickname",
-                "validation": {"required": False},
-            },
-            {
-                "id": "singular",
-                "type": "string",
-                "label": "Singular",
-                "description": "The singular form of the item nickname",
-                "validation": {"required": False},
-            },
-            {
-                "id": "plural",
-                "type": "string",
-                "label": "Plural",
-                "description": "The plural form of the item nickname",
-                "validation": {"required": False},
-            },
-        ],
-        "ui_options": {"ui_order": ["preset_type", "singular", "plural"]},
+        "fields": fields,
+        "ui_options": {"ui_order": ui_order},
         "validation": {"required": required},
     }
 
@@ -217,7 +233,7 @@ def build_schema_from_args(args, token):
         elif actual_kind == "LIST":
             field = _array_field(name, label, description, required)
         elif actual_kind == "INPUT_OBJECT":
-            field = _object_field(name, label, description, required)
+            field = _object_field(name, label, description, name, required, token)
         else:
             continue
 

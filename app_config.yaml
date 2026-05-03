@@ -1,8 +1,8 @@
 app_settings:
   app_type: "connector" # only lowercase letters, numbers, and underscores are allowed, e.g. salesforce, sap, zoho_crm, etc.
-  app_name: "Connector Example App"
-  app_icon_svg_url: "https://cdn.brandfetch.io/id9Bpy_H9O/theme/dark/idl_D0lOl6.svg?c=1dxbfHSJFAPEGdCLU4o5B" # this is the icon of the app, should be a URL pointing to a SVG file.
-  app_description: "Connector Example App"
+  app_name: "Monday"
+  app_icon_svg_url: "https://cdn.brandfetch.io/idHFUcTb1F/w/400/h/400/theme/dark/icon.jpeg?c=1bxp0wvq7wli6tjdkvd5tmy2h62eMRuhbHF"
+  app_description: "Monday Connector"
   routes_directory: "src/modules" # this is the directory where the modules are located.
 
 local_development_settings:
