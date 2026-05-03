@@ -38,87 +38,72 @@ def execute():
         if not records:
             raise ManagedError("Missing records parameter")
 
-        # Fetch the GraphQL argument definitions for this mutation via introspection.
-        # This drives both validation and dynamic mutation building below.
-        args = get_mutation_args(object_type, api_token)
+        # Fetch args + return type for this mutation via introspection.
+        # args drive validation and variable building; return_type determines
+        # whether the mutation returns an object (needs "{ id name }") or a
+        # scalar like JSON (no subfields — selection set must be omitted).
+        mutation_info = get_mutation_args(object_type, api_token)
+        args = mutation_info["args"]
         if not args:
             raise ManagedError(f"Unsupported object type: {object_type}")
 
-        # Pre-validate each record against the required args.
-        # Invalid records are added to results immediately; valid ones are batched.
-        results = []
-        valid = []
-        for record in records:
-            _, _, _, missing = build_mutation_vars(args, record, 0)
+        # Strip NON_NULL wrapper to get the base return kind.
+        return_type = mutation_info["return_type"]
+        base_return_kind = (return_type.get("ofType") or return_type).get("kind")
+        selection = "" if base_return_kind in ("SCALAR", "ENUM") else "{ id name }"
+
+        # Validate and build mutation vars in a single pass.
+        # build_mutation_vars resolves each arg's type, extracts the value from the record,
+        # and returns the GQL variable declarations, argument strings, and variable values
+        # needed to construct the mutation. If any required field is missing it raises
+        # immediately — nothing is sent to Monday.com until all records are clean.
+        var_decls = []
+        alias_blocks = []
+        variables = {}
+
+        for i, record in enumerate(records):
+            rec_var_decls, arg_strings, rec_variables, missing = build_mutation_vars(
+                args, record, i
+            )
             if missing:
-                results.append(
-                    {
-                        "success": False,
-                        "error": f"{missing[0]} is required",
-                        "record": record,
-                    }
-                )
-            else:
-                valid.append(record)
-
-        if valid:
-            var_decls = []
-            alias_blocks = []
-            variables = {}
-
-            # Build a single batched mutation using aliases (record_0, record_1, …)
-            # so all valid records are created in one HTTP round-trip.
-            for i, record in enumerate(valid):
-                rec_var_decls, arg_strings, rec_variables, _ = build_mutation_vars(
-                    args, record, i
-                )
-                var_decls.extend(rec_var_decls)
-                variables.update(rec_variables)
-                alias_blocks.append(
-                    f"record_{i}: {object_type}({', '.join(arg_strings)}) {{ id name }}"
-                )
-
-            mutation = (
-                f"mutation ({', '.join(var_decls)}) {{ {' '.join(alias_blocks)} }}"
+                raise ManagedError(f"{missing[0]} is required")
+            var_decls.extend(rec_var_decls)
+            variables.update(rec_variables)
+            # Each record gets an alias (record_0, record_1, …) so all records
+            # are created in a single HTTP round-trip and results can be mapped back by index.
+            alias_blocks.append(
+                f"record_{i}: {object_type}({', '.join(arg_strings)}) {selection}".strip()
             )
 
-            response = requests.post(
-                MONDAY_API_URL,
-                json={"query": mutation, "variables": variables},
-                headers=headers,
-            )
-            response.raise_for_status()
-            api_result = response.json()
+        mutation = f"mutation ({', '.join(var_decls)}) {{ {' '.join(alias_blocks)} }}"
 
-            if "errors" in api_result:
-                # Top-level errors mean the entire batch failed
-                for record in valid:
-                    results.append(
-                        {
-                            "success": False,
-                            "error": api_result["errors"],
-                            "record": record,
-                        }
-                    )
-            else:
-                # Map each aliased result back to its original record by index
-                for i, record in enumerate(valid):
-                    created = api_result["data"].get(f"record_{i}")
-                    if created:
-                        results.append({"success": True, **created})
-                    else:
-                        results.append(
-                            {
-                                "success": False,
-                                "error": "No data returned",
-                                "record": record,
-                            }
-                        )
+        response = requests.post(
+            MONDAY_API_URL,
+            json={"query": mutation, "variables": variables},
+            headers=headers,
+        )
+        response.raise_for_status()
+        api_result = response.json()
 
-        successful = sum(1 for r in results if r["success"])
+        if "errors" in api_result:
+            raise ManagedError(str(api_result["errors"]))
+
+        # Map each aliased result back to its original record by index.
+        # Scalar-returning mutations (e.g. update_board → JSON) give a raw value,
+        # not a dict, so we only spread the result when it's an object.
+        results = []
+        for i in range(len(records)):
+            result_data = api_result["data"].get(f"record_{i}")
+            if result_data is None:
+                raise ManagedError(f"No data returned for record {i + 1}")
+            entry = {"success": True}
+            if isinstance(result_data, dict):
+                entry.update(result_data)
+            results.append(entry)
+
         return Response(
             data={"results": results},
-            metadata={"affected_rows": successful},
+            metadata={"affected_rows": len(results)},
         )
     except ManagedError as e:
         return Response.error(str(e))
@@ -168,7 +153,11 @@ def content():
                 object_types = [
                     {
                         "value": mutation["name"],
-                        "label": humanize(mutation["name"].removeprefix("create_")),
+                        "label": humanize(
+                            mutation["name"]
+                            .removeprefix("create_")
+                            .removeprefix("or_get_")
+                        ),
                     }
                     for mutation in mutations
                     if mutation["name"].startswith("create_")
@@ -241,7 +230,7 @@ def schema():
         # Use GraphQL introspection to discover the args for the selected mutation.
         # build_schema_from_args converts each arg into a form field definition,
         # fetching enum values from the API where needed.
-        args = get_mutation_args(object_type, api_key)
+        args = get_mutation_args(object_type, api_key)["args"]
         fields, ui_order = build_schema_from_args(args, api_key)
 
         # Wrap the generated fields in an array field so the user can create

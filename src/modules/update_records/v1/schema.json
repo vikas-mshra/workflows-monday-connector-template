@@ -16,7 +16,7 @@
       "id": "object_type",
       "type": "string",
       "label": "Object Type",
-      "description": "Select the object type to update a record for",
+      "description": "Select the object type to reveal its specific fields",
       "validation": {
         "required": true
       },
