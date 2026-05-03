@@ -1,8 +1,9 @@
-from workflows_cdk import Response, Request, ManagedError
-from flask import request as flask_request
 import requests
-import os
+from flask import request as flask_request
 from main import router
+from model import get_mutation_args, run_monday_query
+from utility import build_mutation_vars, build_schema_from_args, humanize
+from workflows_cdk import ManagedError, Request, Response
 
 MONDAY_API_URL = "https://api.monday.com/v2"
 
@@ -16,48 +17,93 @@ def execute():
         request = Request(flask_request)
         data = request.data
 
-        # Validate required parameters
         if not data:
             raise ManagedError("Missing request parameters")
-
         if not data.get("api_key"):
             raise ManagedError("Missing API key parameter")
-
-        if not data.get("identifier"):
-            raise ManagedError("Missing identifier parameter")
+        if not data.get("object_type"):
+            raise ManagedError("Missing object type parameter")
 
         api_token = data.get("api_key")
-        identifier = data.get("identifier")
+        object_type = data.get("object_type")
 
-        # Build the headers
         headers = {
             "Authorization": api_token,
             "Content-Type": "application/json",
         }
 
-        # Build the query based on the object type
-        query = """
-            mutation ($boardId: ID!) {
-                delete_board(board_id: $boardId) {
-                    id
-                }
-            }
-        """
+        # Records are keyed by object_type in the payload (e.g. "delete_board": [...])
+        records = data.get(object_type)
+        if not records:
+            raise ManagedError("Missing records parameter")
+
+        # Fetch args + return type for this mutation via introspection.
+        # args drive validation and variable building; return_type determines
+        # whether the mutation returns an object (needs "{ id name }") or a
+        # scalar like JSON (no subfields — selection set must be omitted).
+        mutation_info = get_mutation_args(object_type, api_token)
+        args = mutation_info["args"]
+        if not args:
+            raise ManagedError(f"Unsupported object type: {object_type}")
+
+        # Strip NON_NULL wrapper to get the base return kind.
+        return_type = mutation_info["return_type"]
+        base_return_kind = (return_type.get("ofType") or return_type).get("kind")
+        selection = "" if base_return_kind in ("SCALAR", "ENUM") else "{ id name }"
+
+        # Validate and build mutation vars in a single pass.
+        # build_mutation_vars resolves each arg's type, extracts the value from the record,
+        # and returns the GQL variable declarations, argument strings, and variable values
+        # needed to construct the mutation. If any required field is missing it raises
+        # immediately — nothing is sent to Monday.com until all records are clean.
+        var_decls = []
+        alias_blocks = []
+        variables = {}
+
+        for i, record in enumerate(records):
+            rec_var_decls, arg_strings, rec_variables, missing = build_mutation_vars(
+                args, record, i
+            )
+            if missing:
+                raise ManagedError(f"{missing[0]} is required")
+            var_decls.extend(rec_var_decls)
+            variables.update(rec_variables)
+            # Each record gets an alias (record_0, record_1, …) so all records
+            # are created in a single HTTP round-trip and results can be mapped back by index.
+            alias_blocks.append(
+                f"record_{i}: {object_type}({', '.join(arg_strings)}) {selection}".strip()
+            )
+
+        mutation = f"mutation ({', '.join(var_decls)}) {{ {' '.join(alias_blocks)} }}"
 
         response = requests.post(
             MONDAY_API_URL,
-            json={
-                "query": query,
-                "variables": {"boardId": identifier},  # identifier = item ID
-            },
+            json={"query": mutation, "variables": variables},
             headers=headers,
         )
+        response.raise_for_status()
+        api_result = response.json()
 
-        result = response.json()
-        if "errors" in result:
-            raise ManagedError(f"Monday.com API error: {result['errors']}")
+        if "errors" in api_result:
+            raise ManagedError(str(api_result["errors"]))
 
-        return Response(data=result)
+        # Map each aliased result back to its original record by index.
+        # Scalar-returning mutations (e.g. update_board → JSON) give a raw value,
+        # not a dict, so we only spread the result when it's an object.
+        results = []
+        for i in range(len(records)):
+            result_data = api_result["data"].get(f"record_{i}")
+            if result_data is None:
+                raise ManagedError(f"No data returned for record {i + 1}")
+            entry = {"success": True}
+            if isinstance(result_data, dict):
+                entry.update(result_data)
+            results.append(entry)
+
+        return Response(
+            data={"results": results},
+            metadata={"affected_rows": len(results)},
+        )
     except ManagedError as e:
         return Response.error(str(e))
     except Exception as e:
@@ -66,55 +112,15 @@ def execute():
 
 @router.route("/content", methods=["GET", "POST"])
 def content():
-    """
-    This is the function that goes and fetches the necessary data to populate the possible choices in dynamic form fields.
-    For example, if you have a module to delete a contact, you would need to fetch the list of contacts to populate the dropdown
-    and give the user the choice of which contact to delete.
-
-    An action's form may have multiple dynamic form fields, each with their own possible choices. Because of this, in the /content route,
-    you will receive a list of content_object_names, which are the identifiers of the dynamic form fields. A /content route may be called for one or more content_object_names.
-
-    Every data object takes the shape of:
-    {
-        "value": "value",
-        "label": "label"
-    }
-
-    Args:
-        data:
-            form_data:
-                form_field_name_1: value1
-                form_field_name_2: value2
-            content_object_names:
-                [
-                    {   "id": "containers"   }
-                ]
-        credentials:
-            connection_data:
-                value: (actual value of the connection)
-
-    Return:
-        {
-            "content_objects": [
-                {
-                    "content_object_name": "containers",
-                    "data": [{"value": "value1", "label": "label1"}]
-                },
-                ...
-            ]
-        }
-    """
     try:
         request = Request(flask_request)
 
         data = request.data
 
-        print(data)
-
         form_data = data.get("form_data", {})
         content_object_names = data.get("content_object_names", [])
 
-        # Extract content object names from objects if needed
+        # content_object_names may arrive as a list of id-objects; flatten to plain strings
         if (
             isinstance(content_object_names, list)
             and content_object_names
@@ -124,95 +130,130 @@ def content():
                 obj.get("id") for obj in content_object_names if "id" in obj
             ]
 
-        content_objects = []  # this is the list of content objects that will be returned to the frontend
-
         api_token = form_data.get("api_key")
-        object_type = form_data.get("object_type")
 
         if not api_token:
             raise ManagedError("Missing API key parameter")
 
-        # Build the headers
-        headers = {
-            "Authorization": api_token,
-            "Content-Type": "application/json",
-        }
+        # Fetch all Mutation field names via introspection so we can derive the
+        # available object types without hardcoding them.
+        result = run_monday_query(
+            query='{ __type(name: "Mutation") { fields { name } } }',
+            token=api_token,
+        )
 
-        query = """
-            {
-                boards(limit: 10) {
-                    id
-                    name
-                    state
-                    workspace_id
-                }
-
-                workspaces(limit: 10) {
-                    id
-                    name
-                    kind
-                }
-
-                users(limit: 10) {
-                    id
-                    name
-                    email
-                }
-
-                teams {
-                    id
-                    name
-                }
-
-                tags {
-                    id
-                    name
-                }
-
-                docs(limit: 10) {
-                    id
-                    name
-                }
-
-                folders(limit: 10) {
-                    id
-                    name
-                }
-
-                account {
-                    id
-                    name
-                }
-            }
-        """
-        response = requests.post(MONDAY_API_URL, json={"query": query}, headers=headers)
-        response.raise_for_status()
-        result = response.json()
-
-        if "errors" in result:
-            raise ManagedError(f"Monday.com API error: {result['errors']}")
+        content_objects = []
 
         for content_object_name in content_object_names:
             if content_object_name == "object_types":
-                top_modules = result["data"].keys()
-                data = [{"value": module, "label": module} for module in top_modules]
-
-                content_objects.append(
-                    {"content_object_name": "object_types", "data": data}
-                )
-
-            elif content_object_name == "identifiers" and object_type:
-                data = [
-                    {"value": record["id"], "label": record["name"]}
-                    for record in result["data"][object_type]
+                # Filter to delete_* mutations and convert to value/label pairs.
+                mutations = result["data"]["__type"]["fields"]
+                object_types = [
+                    {
+                        "value": mutation["name"],
+                        "label": humanize(mutation["name"].removeprefix("delete_")),
+                    }
+                    for mutation in mutations
+                    if mutation["name"].startswith("delete_")
                 ]
-
                 content_objects.append(
-                    {"content_object_name": "identifiers", "data": data}
+                    {"content_object_name": "object_types", "data": object_types}
                 )
-
         return Response(data={"content_objects": content_objects})
 
+    except ManagedError as e:
+        return Response.error(str(e))
+    except Exception as e:
+        return Response.error(str(e))
+
+
+BASE_METADATA = {"workflows_module_schema_version": "1.0.0"}
+BASE_FIELDS = [
+    {
+        "id": "api_key",
+        "type": "string",
+        "label": "API Key",
+        "description": "Your API key for authentication with Monday.com",
+        "validation": {"required": True},
+    },
+    {
+        "id": "object_type",
+        "type": "string",
+        "label": "Object Type",
+        "description": "Select the object type to reveal its specific fields",
+        "validation": {"required": True},
+        "on_action": {"load_schema": True},
+        "choices": {"values": []},
+        "content": {
+            "type": ["managed"],
+            "content_objects": [{"id": "object_types"}],
+        },
+        "ui_options": {"ui_widget": "SelectWidget"},
+    },
+]
+BASE_UI_OPTIONS = {"ui_order": ["api_key", "object_type"]}
+
+
+@router.route("/schema", methods=["GET", "POST"])
+def schema():
+    try:
+        request = Request(flask_request)
+        data = request.data
+
+        form_data = data.get("form_data", {})
+        object_type = form_data.get("object_type")
+        api_key = form_data.get("api_key")
+
+        # Base schema: just the api_key + object_type selector fields.
+        # Returned immediately if the user hasn't filled in the api_key or
+        # hasn't selected an object_type yet.
+        response = Response(
+            data={
+                "schema": {
+                    "metadata": BASE_METADATA,
+                    "fields": BASE_FIELDS,
+                    "ui_options": BASE_UI_OPTIONS,
+                }
+            }
+        )
+
+        if not api_key or not object_type:
+            return response
+
+        # Use GraphQL introspection to discover the args for the selected mutation.
+        # build_schema_from_args converts each arg into a form field definition,
+        # fetching enum values from the API where needed.
+        args = get_mutation_args(object_type, api_key)["args"]
+        if not args:
+            return response
+        fields, ui_order = build_schema_from_args(args, api_key)
+
+        # Wrap the generated fields in an array field so the user can create
+        # multiple records in one workflow execution.
+        return Response(
+            data={
+                "schema": {
+                    "metadata": BASE_METADATA,
+                    "fields": [
+                        *BASE_FIELDS,
+                        {
+                            "id": object_type,
+                            "type": "array",
+                            "label": f"{humanize(object_type)} ID",
+                            "description": f"The ID of the {humanize(object_type)} to delete",
+                            "default": [{}],
+                            "items": {
+                                "type": "object",
+                                "default": {},
+                                "fields": fields,
+                                "ui_options": {"ui_order": ui_order},
+                            },
+                        },
+                    ],
+                    "ui_options": {"ui_order": ["api_key", "object_type", object_type]},
+                }
+            }
+        )
     except ManagedError as e:
         return Response.error(str(e))
     except Exception as e:

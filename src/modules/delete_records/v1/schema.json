@@ -16,9 +16,12 @@
       "id": "object_type",
       "type": "string",
       "label": "Object Type",
-      "description": "Select the object type to delete a record for",
+      "description": "Select the object type to reveal its specific fields",
       "validation": {
         "required": true
+      },
+      "on_action": {
+        "load_schema": true
       },
       "choices": {
         "values": []
@@ -34,32 +37,9 @@
       "ui_options": {
         "ui_widget": "SelectWidget"
       }
-    },
-    {
-      "id": "identifier",
-      "type": "string",
-      "label": "Identifier",
-      "description": "The identifier of the object type you selected above",
-      "validation": {
-        "required": true
-      },
-      "choices": {
-        "values": []
-      },
-      "content": {
-        "type": ["managed"],
-        "content_objects": [
-          {
-            "id": "identifiers"
-          }
-        ]
-      },
-      "ui_options": {
-        "ui_widget": "SelectWidget"
-      }
     }
   ],
   "ui_options": {
-    "ui_order": ["api_key", "object_type", "identifier"]
+    "ui_order": ["api_key", "object_type"]
   }
 }
