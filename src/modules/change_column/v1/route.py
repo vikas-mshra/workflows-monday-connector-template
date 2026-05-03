@@ -158,7 +158,7 @@ def content():
                         "label": humanize(mutation["name"].removeprefix("change_")),
                     }
                     for mutation in mutations
-                    if mutation["name"].startswith("change_")
+                    if mutation["name"].startswith("change_") and "column" in mutation["name"]
                 ]
                 content_objects.append(
                     {"content_object_name": "object_types", "data": object_types}
