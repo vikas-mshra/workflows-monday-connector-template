@@ -2,10 +2,14 @@ import requests
 from flask import request as flask_request
 from main import router
 from src.monday_client import get_query_args, run_monday_query
+from src.monday_config import (
+    BASE_FIELDS,
+    BASE_METADATA,
+    BASE_UI_OPTIONS,
+    MONDAY_API_URL,
+)
 from src.monday_schema import build_query_vars, build_schema_from_args, humanize
 from workflows_cdk import ManagedError, Request, Response
-
-MONDAY_API_URL = "https://api.monday.com/v2"
 
 
 @router.route("/execute", methods=["GET", "POST"])
@@ -149,30 +153,6 @@ def content():
         return Response.error(str(e))
     except Exception as e:
         return Response.error(str(e))
-
-
-BASE_METADATA = {"workflows_module_schema_version": "1.0.0"}
-BASE_FIELDS = [
-    {
-        "id": "api_key",
-        "type": "string",
-        "label": "API Key",
-        "description": "Your API key for authentication with Monday.com",
-        "validation": {"required": True},
-    },
-    {
-        "id": "object_type",
-        "type": "string",
-        "label": "Object Type",
-        "description": "Select the object type to get records for",
-        "validation": {"required": True},
-        "on_action": {"load_schema": True},
-        "choices": {"values": []},
-        "content": {"type": ["managed"], "content_objects": [{"id": "object_types"}]},
-        "ui_options": {"ui_widget": "SelectWidget"},
-    },
-]
-BASE_UI_OPTIONS = {"ui_order": ["api_key", "object_type"]}
 
 
 @router.route("/schema", methods=["GET", "POST"])

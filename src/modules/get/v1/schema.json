@@ -16,15 +16,15 @@
       "id": "object_type",
       "type": "string",
       "label": "Object Type",
-      "description": "Select the object type to get records for",
+      "description": "Select the object type to reveal its specific fields",
       "validation": {
         "required": true
       },
-      "choices": {
-        "values": []
-      },
       "on_action": {
         "load_schema": true
+      },
+      "choices": {
+        "values": []
       },
       "content": {
         "type": ["managed"],
