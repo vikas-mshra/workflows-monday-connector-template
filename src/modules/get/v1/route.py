@@ -1,7 +1,7 @@
 import requests
 from flask import request as flask_request
 from main import router
-from model1 import get_query_args, run_monday_query
+from src.monday_client import get_query_args, run_monday_query
 from utility1 import build_query_vars, build_schema_from_args, humanize
 from workflows_cdk import ManagedError, Request, Response
 

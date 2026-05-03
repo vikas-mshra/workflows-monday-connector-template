@@ -1,7 +1,7 @@
 import json
 import re
 
-from model import run_monday_query
+from src.monday_client import run_monday_query
 
 SCALAR_TYPE_MAP = {
     "String": "string",
@@ -120,7 +120,7 @@ def _object_field(name, label, description, object_name, required, token):
     """
     result = run_monday_query(query=query, token=token)
     input_fields = (result["data"]["__type"] or {}).get("inputFields") or []
-    
+
     fields = []
     ui_order = []
     for f in input_fields:

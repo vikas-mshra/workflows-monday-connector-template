@@ -1,7 +1,7 @@
 import json
 import re
 
-from model1 import run_monday_query
+from src.monday_client import run_monday_query
 
 SCALAR_TYPE_MAP = {
     "String": "string",

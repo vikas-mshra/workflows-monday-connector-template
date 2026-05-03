@@ -1,7 +1,7 @@
 import requests
 from flask import request as flask_request
 from main import router
-from .model import get_mutation_args, run_monday_query
+from src.monday_client import get_mutation_args, run_monday_query
 from .utility import (
     build_mutation_vars,
     build_schema_from_args,
