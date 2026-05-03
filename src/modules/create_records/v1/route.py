@@ -34,14 +34,13 @@ def execute():
         }
 
         results = []
+        records = data.get(object_type)
+        if not records:
+            raise ManagedError("Missing records parameter")
 
         if object_type == "create_board":
-            board_records = data.get("board_records")
-            if not board_records:
-                raise ManagedError("Missing board_records parameter")
-
             valid = []
-            for record in board_records:
+            for record in records:
                 if not record.get("board_name"):
                     results.append(
                         {
@@ -158,7 +157,6 @@ def execute():
                                     "record": record,
                                 }
                             )
-
         else:
             raise ManagedError(f"Unsupported object type: {object_type}")
 
@@ -392,7 +390,7 @@ def schema():
                         *BASE_FIELDS,
                         *schema,
                     ],
-                    "ui_options": {"ui_order": ["api_key", "object_type", "records"]},
+                    "ui_options": {"ui_order": ["api_key", "object_type", object_type]},
                 }
             }
         )
