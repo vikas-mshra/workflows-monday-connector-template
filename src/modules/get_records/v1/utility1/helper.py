@@ -1,3 +1,6 @@
+import json
+import re
+
 from model1 import run_monday_query
 
 SCALAR_TYPE_MAP = {
@@ -160,6 +163,47 @@ def _gql_type_string(type_info):
     if type_info["kind"] == "LIST":
         return f"[{_gql_type_string(type_info['ofType'])}]"
     return type_info["name"]
+
+
+def build_query_vars(args, record, index):
+    s = str(index)
+    var_decls, arg_strings, variables, missing_required = [], [], {}, []
+    for arg in args:
+        name = arg["name"]
+        actual_kind, actual_name, required = _resolve_type(arg["type"])
+        var_name = f"{name}_{s}"
+        gql_type = _gql_type_string(arg["type"])
+        if actual_kind == "LIST":
+            item_key = name.rstrip("s")
+            ids = [
+                str(item[item_key])
+                for item in (record.get(name) or [])
+                if item.get(item_key)
+            ]
+            if not ids:
+                if required:
+                    missing_required.append(name)
+                continue
+            var_decls.append(f"${var_name}: {gql_type}")
+            variables[var_name] = ids
+            arg_strings.append(f"{name}: ${var_name}")
+        else:
+            value = record.get(name)
+            if value is None:
+                if required:
+                    missing_required.append(name)
+                continue
+            if actual_kind == "SCALAR" and actual_name == "JSON":
+                if isinstance(value, dict):
+                    value = json.dumps(value)
+                elif isinstance(value, str):
+                    cleaned = re.sub(r",\s*([}\]])", r"\1", value)
+                    json.loads(cleaned)
+                    value = cleaned
+            var_decls.append(f"${var_name}: {gql_type}")
+            variables[var_name] = value
+            arg_strings.append(f"{name}: ${var_name}")
+    return var_decls, arg_strings, variables, missing_required
 
 
 def build_schema_from_args(args, token):

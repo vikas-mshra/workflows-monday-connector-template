@@ -3,71 +3,95 @@ from flask import request as flask_request
 import requests
 from main import router
 from model1 import get_query_args, run_monday_query
-from utility import build_schema_from_args, humanize
+from utility1 import build_schema_from_args, build_query_vars, humanize
 
 MONDAY_API_URL = "https://api.monday.com/v2"
 
 
 @router.route("/execute", methods=["GET", "POST"])
 def execute():
-    """
-    This is the function that is executed when you click on "Run" on a workflow that uses this action.
-    """
     try:
         request = Request(flask_request)
         data = request.data
 
-        # Validate required parameters
         if not data:
             raise ManagedError("Missing request parameters")
-
         if not data.get("api_key"):
             raise ManagedError("Missing API key parameter")
-
         if not data.get("object_type"):
             raise ManagedError("Missing object type parameter")
 
-        if not data.get("identifier"):
-            raise ManagedError("Missing identifier parameter")
-
         api_key = data.get("api_key")
         object_type = data.get("object_type")
-        identifier = data.get("identifier")
 
-        # Build the headers
         headers = {
             "Authorization": api_key,
             "Content-Type": "application/json",
         }
 
-        # Build the query based on the object type
-        if object_type and identifier:
-            query = f"""
-            query ($identifier: [ID!], $limit: Int) {{
-                {object_type}(ids: $identifier) {{
-                    id
-                    name
-                    items_page(limit: $limit) {{
-                    items {{
-                        id
-                        name
-                    }}
-                    }}
-                }}
-            }}
-            """
+        # Records are keyed by object_type in the payload (e.g. "boards": [...])
+        records = data.get(object_type)
+        if not records:
+            raise ManagedError("Missing records parameter")
 
-        # Make the request
+        # Fetch args + return type for this query via introspection.
+        query_info = get_query_args(object_type, api_key)
+        args = query_info["args"]
+        if not args:
+            raise ManagedError(f"Unsupported object type: {object_type}")
+
+        # Strip NON_NULL wrapper to get the base return kind.
+        return_type = query_info["return_type"]
+        base_return_kind = (return_type.get("ofType") or return_type).get("kind")
+        selection = "" if base_return_kind in ("SCALAR", "ENUM") else "{ id name }"
+
+        # Validate and build query vars in a single pass.
+        var_decls = []
+        alias_blocks = []
+        variables = {}
+
+        for i, record in enumerate(records):
+            rec_var_decls, arg_strings, rec_variables, missing = build_query_vars(
+                args, record, i
+            )
+            if missing:
+                raise ManagedError(f"{missing[0]} is required")
+            var_decls.extend(rec_var_decls)
+            variables.update(rec_variables)
+            # Each record gets an alias so all queries run in a single HTTP round-trip.
+            alias_blocks.append(
+                f"record_{i}: {object_type}({', '.join(arg_strings)}) {selection}".strip()
+            )
+
+        gql_query = f"query ({', '.join(var_decls)}) {{ {' '.join(alias_blocks)} }}"
+
         response = requests.post(
             MONDAY_API_URL,
-            json={
-                "query": query,
-                "variables": {"identifier": identifier, "limit": 50},
-            },
+            json={"query": gql_query, "variables": variables},
             headers=headers,
         )
+        response.raise_for_status()
+        api_result = response.json()
 
-        return Response(data=response.json())
+        if "errors" in api_result:
+            raise ManagedError(str(api_result["errors"]))
+
+        results = []
+        for i in range(len(records)):
+            result_data = api_result["data"].get(f"record_{i}")
+            if result_data is None:
+                raise ManagedError(f"No data returned for record {i + 1}")
+            entry = {"success": True}
+            if isinstance(result_data, dict):
+                entry.update(result_data)
+            elif isinstance(result_data, list):
+                entry["data"] = result_data
+            results.append(entry)
+
+        return Response(
+            data={"results": results},
+            metadata={"affected_rows": len(results)},
+        )
     except ManagedError as e:
         return Response.error(str(e))
     except Exception as e:
