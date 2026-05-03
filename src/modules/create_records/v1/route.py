@@ -3,6 +3,9 @@ from flask import request as flask_request
 import requests
 from main import router
 
+from model import run_monday_query
+from utility import build_schema_from_args, humanize
+
 MONDAY_API_URL = "https://api.monday.com/v2"
 
 
@@ -15,24 +18,15 @@ def execute():
         request = Request(flask_request)
         data = request.data
 
-        # Validate required parameters
         if not data:
             raise ManagedError("Missing request parameters")
-
         if not data.get("api_key"):
             raise ManagedError("Missing API key parameter")
-
         if not data.get("object_type"):
             raise ManagedError("Missing object type parameter")
-        
-        if not data.get("records"):
-            raise ManagedError("Missing information to create the records")
-
-#     'records': [{'board_name': 'test name', 'kind': 'public'}]
 
         api_token = data.get("api_key")
         object_type = data.get("object_type")
-        records = data.get("records")
 
         headers = {
             "Authorization": api_token,
@@ -41,53 +35,130 @@ def execute():
 
         results = []
 
-        if object_type == "boards":
-            mutation = """
-                mutation ($board_name: String!, $board_kind: BoardKind!) {
-                    create_board(board_name: $board_name, board_kind: $board_kind) {
-                        id
-                        name
-                        state
-                    }
-                }
-            """
-            for record in records:
-                board_name = record.get("board_name")
-                kind = record.get("kind", "public")
+        if object_type == "create_board":
+            board_records = data.get("board_records")
+            if not board_records:
+                raise ManagedError("Missing board_records parameter")
 
-                if not board_name:
-                    results.append({
-                        "success": False,
-                        "error": "board_name is required",
-                        "record": record,
-                    })
-                    continue
+            valid = []
+            for record in board_records:
+                if not record.get("board_name"):
+                    results.append(
+                        {
+                            "success": False,
+                            "error": "board_name is required",
+                            "record": record,
+                        }
+                    )
+                elif not record.get("board_kind"):
+                    results.append(
+                        {
+                            "success": False,
+                            "error": "board_kind is required",
+                            "record": record,
+                        }
+                    )
+                else:
+                    valid.append(record)
+
+            if valid:
+                var_decls = []
+                alias_blocks = []
+                variables = {}
+
+                for i, record in enumerate(valid):
+                    s = str(i)
+
+                    var_decls += [
+                        f"$board_name_{s}: String!",
+                        f"$board_kind_{s}: BoardKind!",
+                    ]
+                    variables[f"board_name_{s}"] = record["board_name"]
+                    variables[f"board_kind_{s}"] = record["board_kind"]
+                    args = [
+                        f"board_name: $board_name_{s}",
+                        f"board_kind: $board_kind_{s}",
+                    ]
+
+                    for field, gql_type in [
+                        ("folder_id", "ID"),
+                        ("workspace_id", "ID"),
+                        ("template_id", "Int"),
+                        ("description", "String"),
+                        ("empty", "Boolean"),
+                    ]:
+                        if record.get(field) is not None:
+                            var_decls.append(f"${field}_{s}: {gql_type}")
+                            variables[f"{field}_{s}"] = record[field]
+                            args.append(f"{field}: ${field}_{s}")
+
+                    if record.get("item_nickname"):
+                        var_decls.append(f"$item_nickname_{s}: ItemNicknameInput")
+                        variables[f"item_nickname_{s}"] = record["item_nickname"]
+                        args.append(f"item_nickname: $item_nickname_{s}")
+
+                    for field, item_key in [
+                        ("board_owner_ids", "board_owner_id"),
+                        ("board_owner_team_ids", "board_owner_team_id"),
+                        ("board_subscriber_ids", "board_subscriber_id"),
+                        ("board_subscriber_teams_ids", "board_subscriber_teams_id"),
+                    ]:
+                        ids = [
+                            str(item[item_key])
+                            for item in (record.get(field) or [])
+                            if item.get(item_key)
+                        ]
+                        if ids:
+                            var_decls.append(f"${field}_{s}: [ID!]")
+                            variables[f"{field}_{s}"] = ids
+                            args.append(f"{field}: ${field}_{s}")
+
+                    alias_blocks.append(
+                        f"board_{i}: create_board({', '.join(args)}) {{ id name state }}"
+                    )
+
+                mutation = (
+                    f"mutation ({', '.join(var_decls)}) {{ {' '.join(alias_blocks)} }}"
+                )
 
                 response = requests.post(
                     MONDAY_API_URL,
-                    json={
-                        "query": mutation,
-                        "variables": {"board_name": board_name, "board_kind": kind},
-                    },
+                    json={"query": mutation, "variables": variables},
                     headers=headers,
                 )
                 response.raise_for_status()
-                result = response.json()
+                api_result = response.json()
 
-                if "errors" in result:
-                    results.append({
-                        "success": False,
-                        "error": result["errors"],
-                        "record": record,
-                    })
+                if "errors" in api_result:
+                    for record in valid:
+                        results.append(
+                            {
+                                "success": False,
+                                "error": api_result["errors"],
+                                "record": record,
+                            }
+                        )
                 else:
-                    created = result["data"]["create_board"]
-                    results.append({
-                        "success": True,
-                        "id": created["id"],
-                        "name": created["name"],
-                        "state": created["state"],
-                    })
+                    for i, record in enumerate(valid):
+                        created = api_result["data"].get(f"board_{i}")
+                        if created:
+                            results.append(
+                                {
+                                    "success": True,
+                                    "id": created["id"],
+                                    "name": created["name"],
+                                    "state": created["state"],
+                                }
+                            )
+                        else:
+                            results.append(
+                                {
+                                    "success": False,
+                                    "error": "No data returned",
+                                    "record": record,
+                                }
+                            )
+
         else:
             raise ManagedError(f"Unsupported object type: {object_type}")
 
@@ -223,11 +294,15 @@ BASE_FIELDS = [
         "description": "Select the object type to reveal its specific fields",
         "validation": {"required": True},
         "on_action": {"load_schema": True},
-        "choices": {"values": []},
-        "content": {
-            "type": ["managed"],
-            "content_objects": [{"id": "object_types"}],
-        },
+        "choices": [
+            {"value": "create_board", "label": "Board"},
+            {"value": "create_item", "label": "Item"},
+            {"value": "create_subitem", "label": "Subitem"},
+            {"value": "create_update", "label": "Update"},
+            {"value": "create_workspace", "label": "Workspace"},
+            {"value": "create_folder", "label": "Folder"},
+            {"value": "create_group", "label": "Group"},
+        ],
         "ui_options": {"ui_widget": "SelectWidget"},
     },
 ]
@@ -243,8 +318,6 @@ def schema():
         form_data = data.get("form_data", {})
         object_type = form_data.get("object_type")
         api_key = form_data.get("api_key")
-        
-        print(form_data)
 
         response = Response(
             data={
@@ -259,59 +332,70 @@ def schema():
         if not api_key:
             return response
 
-        if object_type == "boards":
-            boards_fields = [
-                {
-                    "default": [{}],
-                    "description": "List of boards to create",
-                    "id": "records",
-                    "items": {
-                        "default": {},
-                        "fields": [
-                            {
-                                "default": "",
-                                "description": "The name of the board",
-                                "id": "board_name",
-                                "label": "Board Name",
-                                "type": "string",
-                                "validation": {"required": True},
-                            },
-                            {
-                                "default": "",
-                                "description": "The kind of board",
-                                "id": "kind",
-                                "label": "Kind",
-                                "type": "string",
-                                "validation": {"required": True},
-                            },
-                        ],
-                        "type": "object",
-                        "ui_options": {
-                            "ui_order": [
-                                "board_name",
-                                "kind",
-                            ]
-                        },
-                    },
-                    "label": "Records",
-                    "type": "array",
-                    "validation": {"min_items": 1},
-                },
-            ]
-            return Response(
-                data={
-                    "schema": {
-                        "metadata": BASE_METADATA,
-                        "fields": [
-                            *BASE_FIELDS,
-                            *boards_fields,
-                        ],
-                        "ui_options": {
-                            "ui_order": ["api_key", "object_type", "records"]
-                        },
+        # fetch the schema for the object type
+        query = """
+            query {
+                __type(name: "Mutation") {
+                    fields {
+                    name
+                    args {
+                        name
+                        type {
+                        name
+                        kind
+                        ofType {
+                            name
+                            kind
+                        }
+                        }
+                        description
+                    }
                     }
                 }
-            )
+            }
+        """
+        # 1. Run the query to get the mutation fields
+        result = run_monday_query(query=query, token=api_key)
+
+        # 2. Extract mutation fields
+        fields = result["data"]["__type"]["fields"]
+
+        # 3. Find create_board
+        create_fields_args = []
+        for field in fields:
+            if field["name"] == object_type:
+                create_fields_args = field["args"]
+                break
+
+        fields, ui_order = build_schema_from_args(create_fields_args, api_key)
+
+        schema = [
+            {
+                "id": object_type,
+                "type": "array",
+                "label": f"{humanize(object_type)} Records",
+                "description": f"List of {humanize(object_type)} to create",
+                "default": [{}],
+                "items": {
+                    "type": "object",
+                    "default": {},
+                    "fields": fields,
+                    "ui_options": {"ui_order": ui_order},
+                },
+            }
+        ]
+        return Response(
+            data={
+                "schema": {
+                    "metadata": BASE_METADATA,
+                    "fields": [
+                        *BASE_FIELDS,
+                        *schema,
+                    ],
+                    "ui_options": {"ui_order": ["api_key", "object_type", "records"]},
+                }
+            }
+        )
 
         return response
     except ManagedError as e:
