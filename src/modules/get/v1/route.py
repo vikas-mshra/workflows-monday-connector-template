@@ -8,6 +8,7 @@ from src.monday_config import (
     BASE_UI_OPTIONS,
     MONDAY_API_URL,
 )
+from src.monday_content import build_content_response
 from src.monday_schema import build_query_vars, build_schema_from_args, humanize
 from workflows_cdk import ManagedError, Request, Response
 
@@ -129,55 +130,13 @@ def execute():
 
 @router.route("/content", methods=["GET", "POST"])
 def content():
-    try:
-        request = Request(flask_request)
-
-        data = request.data
-
-        form_data = data.get("form_data", {})
-        content_object_names = data.get("content_object_names", [])
-
-        # content_object_names may arrive as a list of id-objects; flatten to plain strings
-        if (
-            isinstance(content_object_names, list)
-            and content_object_names
-            and isinstance(content_object_names[0], dict)
-        ):
-            content_object_names = [
-                obj.get("id") for obj in content_object_names if "id" in obj
-            ]
-
-        api_token = form_data.get("api_key")
-
-        if not api_token:
-            raise ManagedError("Missing API key parameter")
-
-        # Fetch all Query field names via introspection so we can derive the
-        # available object types without hardcoding them.
-        result = run_monday_query(
-            query='{ __type(name: "Query") { fields { name } } }',
-            token=api_token,
-        )
-
-        content_objects = []
-
-        for content_object_name in content_object_names:
-            if content_object_name == "object_types":
-                queries = result["data"]["__type"]["fields"]
-                object_types = [
-                    {"value": query["name"], "label": humanize(query["name"])}
-                    for query in queries
-                ]
-                content_objects.append(
-                    {"content_object_name": "object_types", "data": object_types}
-                )
-
-        return Response(data={"content_objects": content_objects})
-
-    except ManagedError as e:
-        return Response.error(str(e))
-    except Exception as e:
-        return Response.error(str(e))
+    return build_content_response(
+        flask_request,
+        lambda fields: [
+            {"value": f["name"], "label": humanize(f["name"])} for f in fields
+        ],
+        gql_root_type="Query",
+    )
 
 
 @router.route("/schema", methods=["GET", "POST"])
