@@ -1,6 +1,8 @@
 import time
 
 import requests
+from graphql import parse as gql_parse
+from graphql.error import GraphQLSyntaxError
 from workflows_cdk import ManagedError
 
 MONDAY_API_URL = "https://api.monday.com/v2"
@@ -46,6 +48,11 @@ def run_monday_query(query: str, token: str, variables: dict = None):
 
     Raises ManagedError on API-level errors and after all retries are exhausted.
     """
+    try:
+        gql_parse(query)
+    except GraphQLSyntaxError as e:
+        raise ManagedError(f"Invalid GraphQL syntax: {e.message}")
+
     headers = {"Authorization": token, "Content-Type": "application/json"}
     payload = {"query": query}
     if variables:
@@ -56,7 +63,9 @@ def run_monday_query(query: str, token: str, variables: dict = None):
         global _simulate_429_fired
         if _SIMULATE_429 and not _simulate_429_fired:
             _simulate_429_fired = True
-            print(f"[TEST] Simulating 429 on attempt {attempt} for query {query}, will retry in 10s")
+            print(
+                f"[TEST] Simulating 429 on attempt {attempt} for query {query}, will retry in 10s"
+            )
             time.sleep(10)
             continue
 
@@ -74,7 +83,7 @@ def run_monday_query(query: str, token: str, variables: dict = None):
                     f"Monday.com request failed after {_MAX_RETRIES} retries "
                     f"(status {response.status_code})"
                 )
-            time.sleep(wait if wait is not None else 2 ** attempt)
+            time.sleep(wait if wait is not None else 2**attempt)
             continue
 
         response.raise_for_status()
