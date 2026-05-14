@@ -6,6 +6,7 @@ SCALAR_TYPE_MAP = {
     "Boolean": "boolean",
     "ID": "integer",
     "Int": "integer",
+    "Float": "string",
     "JSON": "string",
     "ISO8601DateTime": "string",
 }
@@ -36,6 +37,22 @@ def _resolve_type(type_info: dict) -> tuple:
         of_type = type_info.get("ofType") or {}
         return of_type.get("kind"), of_type.get("name"), True
     return type_info["kind"], type_info.get("name"), False
+
+
+def _peel_non_null(type_info: dict) -> tuple:
+    """
+    Fully unwraps all NON_NULL wrappers, returning (inner_type_dict, required).
+
+    Unlike _resolve_type (which peels exactly one layer and returns only kind/name),
+    this returns the actual type dict so callers can continue walking ofType — necessary
+    for stacked wrappers like NON_NULL(LIST(NON_NULL(INPUT_OBJECT))).
+    """
+    required = False
+    t = type_info
+    while t and t.get("kind") == "NON_NULL":
+        required = True
+        t = t.get("ofType") or {}
+    return t, required
 
 
 def _enum_field(name, label, description, enum_name, required, token) -> dict:
@@ -85,9 +102,25 @@ def _scalar_field(name, label, description, scalar_name, required) -> dict:
     return field
 
 
-def _array_field(name, label, description, required) -> dict:
-    """Builds a repeatable list field for a GraphQL LIST arg."""
-    item_name = name.rstrip("s")
+def _array_field(name, label, description, required, item_fields=None, item_ui_order=None) -> dict:
+    """Builds a repeatable list field for a GraphQL LIST arg.
+
+    Pass item_fields + item_ui_order to get typed items (e.g. for LIST(INPUT_OBJECT)).
+    When omitted, falls back to a single generic string item derived by stripping
+    a trailing 's' from the field name — a heuristic for untyped scalar lists.
+    """
+    if item_fields is None:
+        item_name = name.rstrip("s")
+        item_fields = [
+            {
+                "id": item_name,
+                "type": "string",
+                "label": humanize(item_name),
+                "description": description.rstrip("s") if description else "",
+                "validation": {"required": False},
+            }
+        ]
+        item_ui_order = [item_name]
     return {
         "id": name,
         "type": "array",
@@ -97,29 +130,27 @@ def _array_field(name, label, description, required) -> dict:
         "items": {
             "type": "object",
             "default": {},
-            "fields": [
-                {
-                    "id": item_name,
-                    "type": "string",
-                    "label": humanize(item_name),
-                    "description": description.rstrip("s") if description else "",
-                    "validation": {"required": False},
-                }
-            ],
-            "ui_options": {"ui_order": [item_name]},
+            "fields": item_fields,
+            "ui_options": {"ui_order": item_ui_order},
         },
         "validation": {"min_items": 1} if required else {},
     }
 
 
-def _object_field(name, label, description, object_name, required, token) -> dict:
+def _object_field(name, label, description, object_name, required, token, visited=None) -> dict:
     """
     Builds a grouped object field for a GraphQL INPUT_OBJECT arg.
 
-    Introspects the input type's fields dynamically so this works for any
-    INPUT_OBJECT without hardcoding — PaginationInput, ItemsQuery, etc.
-    Only flat SCALAR sub-fields are rendered; nested objects/enums are skipped.
+    Introspects the input type's fields dynamically — handles SCALAR, ENUM,
+    LIST, and nested INPUT_OBJECT sub-fields. Cycle detection via `visited`
+    prevents infinite recursion on self-referential types like ItemsQueryGroup.
     """
+    # | creates a new set per call; .add() would mutate the shared set and cause
+    # sibling branches to incorrectly skip types they haven't visited yet.
+    visited = (visited or set()) | {object_name}
+
+    # 4 levels of ofType covers the deepest Monday.com wrapping:
+    # NON_NULL -> LIST -> NON_NULL -> INPUT_OBJECT
     query = f"""
         query {{
             __type(name: "{object_name}") {{
@@ -129,7 +160,18 @@ def _object_field(name, label, description, object_name, required, token) -> dic
                     type {{
                         name
                         kind
-                        ofType {{ name kind }}
+                        ofType {{
+                            name
+                            kind
+                            ofType {{
+                                name
+                                kind
+                                ofType {{
+                                    name
+                                    kind
+                                }}
+                            }}
+                        }}
                     }}
                 }}
             }}
@@ -142,18 +184,43 @@ def _object_field(name, label, description, object_name, required, token) -> dic
     ui_order = []
     for f in input_fields:
         f_name = f["name"]
-        f_kind, f_scalar_name, f_required = _resolve_type(f["type"])
-        if f_kind != "SCALAR":
+        f_label = humanize(f_name)
+        f_description = f.get("description") or ""
+        t, f_required = _peel_non_null(f["type"])
+        f_kind = t.get("kind")
+        f_type_name = t.get("name")
+
+        if f_kind == "SCALAR":
+            sub_field = _scalar_field(f_name, f_label, f_description, f_type_name, f_required)
+        elif f_kind == "ENUM":
+            sub_field = _enum_field(f_name, f_label, f_description, f_type_name, f_required, token)
+        elif f_kind == "LIST":
+            elem_t, _ = _peel_non_null(t.get("ofType") or {})
+            elem_kind = elem_t.get("kind")
+            elem_name = elem_t.get("name")
+            # Guard against self-referential lists (e.g. ItemsQueryGroup.groups -> ItemsQueryGroup).
+            if elem_kind == "INPUT_OBJECT" and elem_name not in visited:
+                nested = _object_field(f_name, f_label, f_description, elem_name, False, token, visited)
+                sub_field = _array_field(
+                    f_name, f_label, f_description, f_required,
+                    item_fields=nested["fields"],
+                    item_ui_order=nested["ui_options"]["ui_order"],
+                )
+            elif elem_kind == "ENUM" and elem_name:
+                item_name = f_name.rstrip("s") or f_name
+                item_field = _enum_field(item_name, humanize(item_name), f_description, elem_name, False, token)
+                sub_field = _array_field(f_name, f_label, f_description, f_required,
+                                         item_fields=[item_field], item_ui_order=[item_name])
+            else:
+                sub_field = _array_field(f_name, f_label, f_description, f_required)
+        elif f_kind == "INPUT_OBJECT":
+            if f_type_name in visited:
+                continue
+            sub_field = _object_field(f_name, f_label, f_description, f_type_name, f_required, token, visited)
+        else:
             continue
-        fields.append(
-            {
-                "id": f_name,
-                "type": SCALAR_TYPE_MAP.get(f_scalar_name, "string"),
-                "label": humanize(f_name),
-                "description": f.get("description", ""),
-                "validation": {"required": f_required},
-            }
-        )
+
+        fields.append(sub_field)
         ui_order.append(f_name)
 
     return {
@@ -187,9 +254,30 @@ def build_schema_from_args(args: list, token: str) -> tuple:
         elif actual_kind == "SCALAR":
             field = _scalar_field(name, label, description, actual_name, required)
         elif actual_kind == "LIST":
-            field = _array_field(name, label, description, required)
+            # _resolve_type discards the type dict; re-peel to get the LIST node
+            # so we can walk into its ofType and identify the element type.
+            raw_t, _ = _peel_non_null(arg["type"])
+            elem_t, _ = _peel_non_null(raw_t.get("ofType") or {})
+            elem_kind = elem_t.get("kind")
+            elem_name = elem_t.get("name")
+            if elem_kind == "INPUT_OBJECT":
+                nested = _object_field(name, label, description, elem_name, False, token)
+                field = _array_field(
+                    name, label, description, required,
+                    item_fields=nested["fields"],
+                    item_ui_order=nested["ui_options"]["ui_order"],
+                )
+            elif elem_kind == "ENUM" and elem_name:
+                item_name = name.rstrip("s") or name
+                item_field = _enum_field(item_name, humanize(item_name), description, elem_name, False, token)
+                field = _array_field(name, label, description, required,
+                                     item_fields=[item_field], item_ui_order=[item_name])
+            else:
+                field = _array_field(name, label, description, required)
         elif actual_kind == "INPUT_OBJECT":
-            field = _object_field(name, label, description, name, required, token)
+            field = _object_field(
+                name, label, description, actual_name, required, token
+            )
         else:
             continue
 
