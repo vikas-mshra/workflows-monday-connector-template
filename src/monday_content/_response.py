@@ -30,13 +30,13 @@ def build_content_response(flask_request, filter_object_types, gql_root_type="Mu
                 obj.get("id") for obj in content_object_names if "id" in obj
             ]
 
-        api_token = form_data.get("api_key")
-        if not api_token:
+        api_key = form_data.get("api_key")
+        if not api_key:
             raise ManagedError("Missing API key parameter")
 
         result = run_monday_query(
             query=f'{{ __type(name: "{gql_root_type}") {{ fields {{ name }} }} }}',
-            token=api_token,
+            token=api_key,
         )
 
         content_objects = []
