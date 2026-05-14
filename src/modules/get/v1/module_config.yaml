@@ -1,4 +1,3 @@
-name: "Get"
-description: "Retrieves existing entities—such as boards, items, users, teams, workspaces, or activity logs—along with their attributes and relationships from Monday.com."
-version: "1"
-category: "monday_crm"
+module_settings:
+  module_name: "Get"
+  module_description: "Retrieves existing entities—such as boards, items, users, teams, workspaces, or activity logs—along with their attributes and relationships from Monday.com."

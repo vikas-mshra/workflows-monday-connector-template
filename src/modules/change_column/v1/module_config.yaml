@@ -1,4 +1,3 @@
-name: "Change Column"
-description: "Updates column definitions and values for items, including metadata, titles, and one or multiple column values across simple and complex column types."
-version: "1"
-category: "monday_crm"
+module_settings:
+  module_name: "Change Column"
+  module_description: "Updates column definitions and values for items, including metadata, titles, and one or multiple column values across simple and complex column types."

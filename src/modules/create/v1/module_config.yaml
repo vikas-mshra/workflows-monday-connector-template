@@ -1,4 +1,3 @@
-name: "Create"
-description: "Creates new standalone entities—such as boards, items, groups, columns, updates, or workspaces—as fresh records in your Monday.com account."
-version: "1"
-category: "monday_crm"
+module_settings:
+  module_name: "Create"
+  module_description: "Creates new standalone entities—such as boards, items, groups, columns, updates, or workspaces—as fresh records in your Monday.com account."

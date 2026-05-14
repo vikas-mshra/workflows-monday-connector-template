@@ -1,4 +1,3 @@
-name: "Delete"
-description: "Removes existing entities—such as boards, items, groups, columns, updates, or subscribers—permanently from your Monday.com account."
-version: "1"
-category: "monday_crm"
+module_settings:
+  module_name: "Delete"
+  module_description: "Removes existing entities—such as boards, items, groups, columns, updates, or subscribers—permanently from your Monday.com account."
