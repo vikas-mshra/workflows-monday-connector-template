@@ -29,11 +29,11 @@ def execute():
         if not data.get("object_type"):
             raise ManagedError("Missing object type parameter")
 
-        api_token = data.get("api_key")
+        api_key = data.get("api_key")
         object_type = data.get("object_type")
 
         headers = {
-            "Authorization": api_token,
+            "Authorization": api_key,
             "Content-Type": "application/json",
         }
 
@@ -46,7 +46,7 @@ def execute():
         # args drive validation and variable building; return_type determines
         # whether the mutation returns an object (needs "{ id name }") or a
         # scalar like JSON (no subfields — selection set must be omitted).
-        mutation_info = get_mutation_args(object_type, api_token)
+        mutation_info = get_mutation_args(object_type, api_key)
         args = mutation_info["args"]
         if not args:
             raise ManagedError(f"Unsupported object type: {object_type}")
@@ -63,18 +63,18 @@ def execute():
         alias_blocks = []
         variables = {}
 
-        for i, record in enumerate(records):
-            rec_var_decls, arg_strings, rec_variables, missing = build_mutation_vars(
-                args, record, i
+        for record_index, record in enumerate(records):
+            record_var_decls, arg_strings, record_variables, missing = build_mutation_vars(
+                args, record, record_index
             )
             if missing:
                 raise ManagedError(f"{missing[0]} is required")
-            var_decls.extend(rec_var_decls)
-            variables.update(rec_variables)
+            var_decls.extend(record_var_decls)
+            variables.update(record_variables)
             # Each record gets an alias (record_0, record_1, …) so all records
             # are updated in a single HTTP round-trip and results can be mapped back by index.
             alias_blocks.append(
-                f"record_{i}: {object_type}({', '.join(arg_strings)}) {selection}".strip()
+                f"record_{record_index}: {object_type}({', '.join(arg_strings)}) {selection}".strip()
             )
 
         if not var_decls:
@@ -96,14 +96,14 @@ def execute():
         # Scalar-returning mutations (e.g. update_board → JSON) give a raw value,
         # not a dict, so we only spread the result when it's an object.
         results = []
-        for i in range(len(records)):
-            result_data = api_result["data"].get(f"record_{i}")
+        for record_index in range(len(records)):
+            result_data = api_result["data"].get(f"record_{record_index}")
             if result_data is None:
-                raise ManagedError(f"No data returned for record {i + 1}")
-            entry = {"success": True}
+                raise ManagedError(f"No data returned for record {record_index + 1}")
+            result_entry = {"success": True}
             if isinstance(result_data, dict):
-                entry.update(result_data)
-            results.append(entry)
+                result_entry.update(result_data)
+            results.append(result_entry)
 
         return Response(
             data={"results": results},

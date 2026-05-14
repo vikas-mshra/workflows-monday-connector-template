@@ -49,15 +49,15 @@ def execute():
         # Then introspect that type's fields and select only scalar/enum ones.
         # This avoids hardcoding { id name } and returns all flat fields instead.
         return_type = query_info["return_type"]
-        rt = return_type
-        if rt.get("kind") == "NON_NULL":
-            rt = rt.get("ofType") or rt
-        if rt.get("kind") == "LIST":
-            rt = rt.get("ofType") or rt
-            if rt.get("kind") == "NON_NULL":
-                rt = rt.get("ofType") or rt
+        unwrapped_return_type = return_type
+        if unwrapped_return_type.get("kind") == "NON_NULL":
+            unwrapped_return_type = unwrapped_return_type.get("ofType") or unwrapped_return_type
+        if unwrapped_return_type.get("kind") == "LIST":
+            unwrapped_return_type = unwrapped_return_type.get("ofType") or unwrapped_return_type
+            if unwrapped_return_type.get("kind") == "NON_NULL":
+                unwrapped_return_type = unwrapped_return_type.get("ofType") or unwrapped_return_type
 
-        element_type = rt.get("name") if rt.get("kind") == "OBJECT" else None
+        element_type = unwrapped_return_type.get("name") if unwrapped_return_type.get("kind") == "OBJECT" else None
 
         if element_type:
             type_result = run_monday_query(
@@ -71,7 +71,7 @@ def execute():
             ]
             selection = ("{ " + " ".join(scalar_names) + " }") if scalar_names else "{ id name }"
         else:
-            selection = "" if rt.get("kind") in ("SCALAR", "ENUM") else "{ id name }"
+            selection = "" if unwrapped_return_type.get("kind") in ("SCALAR", "ENUM") else "{ id name }"
 
         # Build query vars per record. build_query_vars also collects any
         # missing required fields in the same pass — we raise a clear ManagedError
@@ -80,17 +80,17 @@ def execute():
         alias_blocks = []
         variables = {}
 
-        for i, record in enumerate(records):
-            rec_var_decls, arg_strings, rec_variables, missing = build_query_vars(
-                args, record, i
+        for record_index, record in enumerate(records):
+            record_var_decls, arg_strings, record_variables, missing = build_query_vars(
+                args, record, record_index
             )
             if missing:
                 raise ManagedError(f"{missing[0]} is required")
-            var_decls.extend(rec_var_decls)
-            variables.update(rec_variables)
+            var_decls.extend(record_var_decls)
+            variables.update(record_variables)
             # Each record gets an alias so all queries run in a single HTTP round-trip.
             alias_blocks.append(
-                f"record_{i}: {object_type}({', '.join(arg_strings)}) {selection}".strip()
+                f"record_{record_index}: {object_type}({', '.join(arg_strings)}) {selection}".strip()
             )
 
         if not var_decls:
@@ -109,16 +109,16 @@ def execute():
             raise ManagedError(str(api_result["errors"]))
 
         results = []
-        for i in range(len(records)):
-            result_data = api_result["data"].get(f"record_{i}")
+        for record_index in range(len(records)):
+            result_data = api_result["data"].get(f"record_{record_index}")
             if result_data is None:
-                raise ManagedError(f"No data returned for record {i + 1}")
-            entry = {"success": True}
+                raise ManagedError(f"No data returned for record {record_index + 1}")
+            result_entry = {"success": True}
             if isinstance(result_data, dict):
-                entry.update(result_data)
+                result_entry.update(result_data)
             elif isinstance(result_data, list):
-                entry["data"] = result_data
-            results.append(entry)
+                result_entry["data"] = result_data
+            results.append(result_entry)
 
         return Response(
             data={"results": results},

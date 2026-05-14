@@ -34,11 +34,11 @@ def execute():
         if not data.get("object_type"):
             raise ManagedError("Missing object type parameter")
 
-        api_token = data.get("api_key")
+        api_key = data.get("api_key")
         object_type = data.get("object_type")
 
         headers = {
-            "Authorization": api_token,
+            "Authorization": api_key,
             "Content-Type": "application/json",
         }
 
@@ -51,13 +51,13 @@ def execute():
         # args drive validation and variable building; return_type determines
         # whether the add returns an object (needs "{ id name }") or a
         # scalar like JSON (no subfields — selection set must be omitted).
-        mutation_info = get_mutation_args(object_type, api_token)
+        mutation_info = get_mutation_args(object_type, api_key)
         args = mutation_info["args"]
         if not args:
             raise ManagedError(f"Unsupported object type: {object_type}")
 
         return_type = mutation_info["return_type"]
-        selection = build_selection(return_type, api_token)
+        selection = build_selection(return_type, api_key)
 
         # If any arg is a File scalar, Monday.com requires a multipart upload
         # to /v2/file — the standard JSON transport cannot carry binary data.
@@ -76,38 +76,38 @@ def execute():
             # and forwarded to Monday.com.
             non_file_args = [a for a in args if a["name"] != file_arg_name]
             results = []
-            for i, record in enumerate(records):
-                rec_var_decls, arg_strings, rec_variables, missing = build_mutation_vars(
-                    non_file_args, record, i
+            for record_index, record in enumerate(records):
+                record_var_decls, arg_strings, record_variables, missing = build_mutation_vars(
+                    non_file_args, record, record_index
                 )
                 if missing:
                     raise ManagedError(f"{missing[0]} is required")
-                rec_var_decls.append("$file: File!")
+                record_var_decls.append("$file: File!")
                 arg_strings.append(f"{file_arg_name}: $file")
-                file_mutation = f"mutation ({', '.join(rec_var_decls)}) {{ {object_type}({', '.join(arg_strings)}) {selection} }}"
+                file_mutation = f"mutation ({', '.join(record_var_decls)}) {{ {object_type}({', '.join(arg_strings)}) {selection} }}"
 
                 file_url = record.get(file_arg_name)
                 if not file_url:
-                    raise ManagedError(f"Missing {file_arg_name} for record {i + 1}")
-                file_resp = requests.get(file_url)
-                file_resp.raise_for_status()
+                    raise ManagedError(f"Missing {file_arg_name} for record {record_index + 1}")
+                file_download_response = requests.get(file_url)
+                file_download_response.raise_for_status()
                 filename = file_url.split("/")[-1].split("?")[0] or "upload"
 
                 api_result = run_monday_file_upload(
-                    file_mutation, rec_variables, file_resp.content, filename, api_token
+                    file_mutation, record_variables, file_download_response.content, filename, api_key
                 )
                 if "errors" in api_result:
                     raise ManagedError(str(api_result["errors"]))
 
                 result_data = (api_result.get("data") or {}).get(object_type)
                 if result_data is None:
-                    raise ManagedError(f"No data returned for record {i + 1}")
-                entry = {"success": True}
+                    raise ManagedError(f"No data returned for record {record_index + 1}")
+                result_entry = {"success": True}
                 if isinstance(result_data, dict):
-                    entry.update(result_data)
+                    result_entry.update(result_data)
                 elif isinstance(result_data, list):
-                    entry["items"] = result_data
-                results.append(entry)
+                    result_entry["items"] = result_data
+                results.append(result_entry)
 
             return Response(
                 data={"results": results},
@@ -121,18 +121,18 @@ def execute():
         alias_blocks = []
         variables = {}
 
-        for i, record in enumerate(records):
-            rec_var_decls, arg_strings, rec_variables, missing = build_mutation_vars(
-                args, record, i
+        for record_index, record in enumerate(records):
+            record_var_decls, arg_strings, record_variables, missing = build_mutation_vars(
+                args, record, record_index
             )
             if missing:
                 raise ManagedError(f"{missing[0]} is required")
-            var_decls.extend(rec_var_decls)
-            variables.update(rec_variables)
+            var_decls.extend(record_var_decls)
+            variables.update(record_variables)
             # Each record gets an alias (record_0, record_1, …) so all records
             # are created in a single HTTP round-trip and results can be mapped back by index.
             alias_blocks.append(
-                f"record_{i}: {object_type}({', '.join(arg_strings)}) {selection}".strip()
+                f"record_{record_index}: {object_type}({', '.join(arg_strings)}) {selection}".strip()
             )
 
         if not var_decls:
@@ -154,16 +154,16 @@ def execute():
         # Scalar-returning mutations (e.g. update_board → JSON) give a raw value,
         # not a dict, so we only spread the result when it's an object.
         results = []
-        for i in range(len(records)):
-            result_data = api_result["data"].get(f"record_{i}")
+        for record_index in range(len(records)):
+            result_data = api_result["data"].get(f"record_{record_index}")
             if result_data is None:
-                raise ManagedError(f"No data returned for record {i + 1}")
-            entry = {"success": True}
+                raise ManagedError(f"No data returned for record {record_index + 1}")
+            result_entry = {"success": True}
             if isinstance(result_data, dict):
-                entry.update(result_data)
+                result_entry.update(result_data)
             elif isinstance(result_data, list):
-                entry["items"] = result_data
-            results.append(entry)
+                result_entry["items"] = result_data
+            results.append(result_entry)
 
         return Response(
             data={"results": results},

@@ -26,7 +26,7 @@ def humanize(name: str) -> str:
     return name.replace("_", " ").title()
 
 
-def _resolve_type(type_info: dict) -> tuple:
+def _extract_inner_type(type_info: dict) -> tuple:
     """
     Unwraps one level of NON_NULL and returns (kind, name, required).
 
@@ -39,20 +39,20 @@ def _resolve_type(type_info: dict) -> tuple:
     return type_info["kind"], type_info.get("name"), False
 
 
-def _peel_non_null(type_info: dict) -> tuple:
+def _unwrap_non_null_fully(type_info: dict) -> tuple:
     """
     Fully unwraps all NON_NULL wrappers, returning (inner_type_dict, required).
 
-    Unlike _resolve_type (which peels exactly one layer and returns only kind/name),
+    Unlike _extract_inner_type (which peels exactly one layer and returns only kind/name),
     this returns the actual type dict so callers can continue walking ofType — necessary
     for stacked wrappers like NON_NULL(LIST(NON_NULL(INPUT_OBJECT))).
     """
     required = False
-    t = type_info
-    while t and t.get("kind") == "NON_NULL":
+    current_type = type_info
+    while current_type and current_type.get("kind") == "NON_NULL":
         required = True
-        t = t.get("ofType") or {}
-    return t, required
+        current_type = current_type.get("ofType") or {}
+    return current_type, required
 
 
 def _enum_field(name, label, description, enum_name, required, token) -> dict:
@@ -182,46 +182,46 @@ def _object_field(name, label, description, object_name, required, token, visite
 
     fields = []
     ui_order = []
-    for f in input_fields:
-        f_name = f["name"]
-        f_label = humanize(f_name)
-        f_description = f.get("description") or ""
-        t, f_required = _peel_non_null(f["type"])
-        f_kind = t.get("kind")
-        f_type_name = t.get("name")
+    for input_field in input_fields:
+        field_name = input_field["name"]
+        field_label = humanize(field_name)
+        field_description = input_field.get("description") or ""
+        field_type_info, field_required = _unwrap_non_null_fully(input_field["type"])
+        field_kind = field_type_info.get("kind")
+        field_type_name = field_type_info.get("name")
 
-        if f_kind == "SCALAR":
-            sub_field = _scalar_field(f_name, f_label, f_description, f_type_name, f_required)
-        elif f_kind == "ENUM":
-            sub_field = _enum_field(f_name, f_label, f_description, f_type_name, f_required, token)
-        elif f_kind == "LIST":
-            elem_t, _ = _peel_non_null(t.get("ofType") or {})
-            elem_kind = elem_t.get("kind")
-            elem_name = elem_t.get("name")
+        if field_kind == "SCALAR":
+            sub_field = _scalar_field(field_name, field_label, field_description, field_type_name, field_required)
+        elif field_kind == "ENUM":
+            sub_field = _enum_field(field_name, field_label, field_description, field_type_name, field_required, token)
+        elif field_kind == "LIST":
+            element_type, _ = _unwrap_non_null_fully(field_type_info.get("ofType") or {})
+            element_kind = element_type.get("kind")
+            element_type_name = element_type.get("name")
             # Guard against self-referential lists (e.g. ItemsQueryGroup.groups -> ItemsQueryGroup).
-            if elem_kind == "INPUT_OBJECT" and elem_name not in visited:
-                nested = _object_field(f_name, f_label, f_description, elem_name, False, token, visited)
+            if element_kind == "INPUT_OBJECT" and element_type_name not in visited:
+                nested = _object_field(field_name, field_label, field_description, element_type_name, False, token, visited)
                 sub_field = _array_field(
-                    f_name, f_label, f_description, f_required,
+                    field_name, field_label, field_description, field_required,
                     item_fields=nested["fields"],
                     item_ui_order=nested["ui_options"]["ui_order"],
                 )
-            elif elem_kind == "ENUM" and elem_name:
-                item_name = f_name.rstrip("s") or f_name
-                item_field = _enum_field(item_name, humanize(item_name), f_description, elem_name, False, token)
-                sub_field = _array_field(f_name, f_label, f_description, f_required,
+            elif element_kind == "ENUM" and element_type_name:
+                item_name = field_name.rstrip("s") or field_name
+                item_field = _enum_field(item_name, humanize(item_name), field_description, element_type_name, False, token)
+                sub_field = _array_field(field_name, field_label, field_description, field_required,
                                          item_fields=[item_field], item_ui_order=[item_name])
             else:
-                sub_field = _array_field(f_name, f_label, f_description, f_required)
-        elif f_kind == "INPUT_OBJECT":
-            if f_type_name in visited:
+                sub_field = _array_field(field_name, field_label, field_description, field_required)
+        elif field_kind == "INPUT_OBJECT":
+            if field_type_name in visited:
                 continue
-            sub_field = _object_field(f_name, f_label, f_description, f_type_name, f_required, token, visited)
+            sub_field = _object_field(field_name, field_label, field_description, field_type_name, field_required, token, visited)
         else:
             continue
 
         fields.append(sub_field)
-        ui_order.append(f_name)
+        ui_order.append(field_name)
 
     return {
         "id": name,
@@ -247,29 +247,29 @@ def build_schema_from_args(args: list, token: str) -> tuple:
         name = arg["name"]
         label = humanize(name)
         description = arg.get("description", "")
-        actual_kind, actual_name, required = _resolve_type(arg["type"])
+        actual_kind, actual_name, required = _extract_inner_type(arg["type"])
 
         if actual_kind == "ENUM":
             field = _enum_field(name, label, description, actual_name, required, token)
         elif actual_kind == "SCALAR":
             field = _scalar_field(name, label, description, actual_name, required)
         elif actual_kind == "LIST":
-            # _resolve_type discards the type dict; re-peel to get the LIST node
+            # _extract_inner_type discards the type dict; re-peel to get the LIST node
             # so we can walk into its ofType and identify the element type.
-            raw_t, _ = _peel_non_null(arg["type"])
-            elem_t, _ = _peel_non_null(raw_t.get("ofType") or {})
-            elem_kind = elem_t.get("kind")
-            elem_name = elem_t.get("name")
-            if elem_kind == "INPUT_OBJECT":
-                nested = _object_field(name, label, description, elem_name, False, token)
+            unwrapped_type, _ = _unwrap_non_null_fully(arg["type"])
+            element_type, _ = _unwrap_non_null_fully(unwrapped_type.get("ofType") or {})
+            element_kind = element_type.get("kind")
+            element_type_name = element_type.get("name")
+            if element_kind == "INPUT_OBJECT":
+                nested = _object_field(name, label, description, element_type_name, False, token)
                 field = _array_field(
                     name, label, description, required,
                     item_fields=nested["fields"],
                     item_ui_order=nested["ui_options"]["ui_order"],
                 )
-            elif elem_kind == "ENUM" and elem_name:
+            elif element_kind == "ENUM" and element_type_name:
                 item_name = name.rstrip("s") or name
-                item_field = _enum_field(item_name, humanize(item_name), description, elem_name, False, token)
+                item_field = _enum_field(item_name, humanize(item_name), description, element_type_name, False, token)
                 field = _array_field(name, label, description, required,
                                      item_fields=[item_field], item_ui_order=[item_name])
             else:

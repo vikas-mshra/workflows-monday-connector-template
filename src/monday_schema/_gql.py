@@ -4,7 +4,7 @@ import re
 from src.monday_client import run_monday_query
 
 
-def _resolve_type(type_info: dict) -> tuple:
+def _extract_inner_type(type_info: dict) -> tuple:
     """
     Unwraps one level of NON_NULL and returns (kind, name, required).
 
@@ -26,7 +26,7 @@ def _gql_type_string(type_info: dict) -> str:
     return type_info["name"]
 
 
-def _build_vars(args: list, record: dict, index: int) -> tuple:
+def _build_operation_variables(args: list, record: dict, index: int) -> tuple:
     """
     Shared core for build_mutation_vars and build_query_vars.
 
@@ -36,7 +36,7 @@ def _build_vars(args: list, record: dict, index: int) -> tuple:
     same pass is free (we're already iterating) and gives the user a clear
     `"<field> is required"` error instead of Monday.com's GraphQL error.
     """
-    s = str(index)
+    index_suffix = str(index)
     var_decls = []
     arg_strings = []
     variables = {}
@@ -44,8 +44,8 @@ def _build_vars(args: list, record: dict, index: int) -> tuple:
 
     for arg in args:
         name = arg["name"]
-        actual_kind, actual_name, required = _resolve_type(arg["type"])
-        var_name = f"{name}_{s}"
+        actual_kind, actual_name, required = _extract_inner_type(arg["type"])
+        var_name = f"{name}_{index_suffix}"
         gql_type = _gql_type_string(arg["type"])
 
         if actual_kind == "LIST":
@@ -88,12 +88,12 @@ def _build_vars(args: list, record: dict, index: int) -> tuple:
 
 def build_mutation_vars(args: list, record: dict, index: int) -> tuple:
     """Variable builder for mutation operations (create, update, delete, duplicate)."""
-    return _build_vars(args, record, index)
+    return _build_operation_variables(args, record, index)
 
 
 def build_query_vars(args: list, record: dict, index: int) -> tuple:
     """Variable builder for query operations (get/list)."""
-    return _build_vars(args, record, index)
+    return _build_operation_variables(args, record, index)
 
 
 def build_selection(return_type: dict, api_token: str) -> str:
@@ -111,11 +111,11 @@ def build_selection(return_type: dict, api_token: str) -> str:
       JSON (scalar)     ->  ""                  (scalars need no selection set)
     """
     # Peel off NON_NULL wrapper to get to the actual type underneath.
-    rt = return_type
-    if rt.get("kind") == "NON_NULL":
-        rt = rt.get("ofType") or rt
+    unwrapped_return_type = return_type
+    if unwrapped_return_type.get("kind") == "NON_NULL":
+        unwrapped_return_type = unwrapped_return_type.get("ofType") or unwrapped_return_type
 
-    kind = rt.get("kind")
+    kind = unwrapped_return_type.get("kind")
 
     # Scalars and enums have no sub-fields to select.
     if kind in ("SCALAR", "ENUM"):
@@ -123,14 +123,14 @@ def build_selection(return_type: dict, api_token: str) -> str:
 
     # For list return types, unwrap to the element type.
     if kind == "LIST":
-        inner = rt.get("ofType") or {}
+        inner = unwrapped_return_type.get("ofType") or {}
         if inner.get("kind") == "NON_NULL":
             inner = inner.get("ofType") or inner
         if inner.get("kind") in ("SCALAR", "ENUM"):
             return ""
-        rt = inner
+        unwrapped_return_type = inner
 
-    type_name = rt.get("name")
+    type_name = unwrapped_return_type.get("name")
     if not type_name:
         return "{ id name }"
 
@@ -141,18 +141,18 @@ def build_selection(return_type: dict, api_token: str) -> str:
     fields = ((result["data"].get("__type") or {}).get("fields")) or []
 
     parts = []
-    for f in fields:
-        f_type = f["type"]
-        if f_type.get("kind") == "NON_NULL":
-            f_type = f_type.get("ofType") or f_type
-        f_kind = f_type.get("kind")
+    for field_definition in fields:
+        field_type = field_definition["type"]
+        if field_type.get("kind") == "NON_NULL":
+            field_type = field_type.get("ofType") or field_type
+        field_kind = field_type.get("kind")
 
-        if f_kind in ("SCALAR", "ENUM"):
+        if field_kind in ("SCALAR", "ENUM"):
             # Plain value — select directly, e.g. "id", "name"
-            parts.append(f["name"])
-        elif f_kind == "OBJECT":
+            parts.append(field_definition["name"])
+        elif field_kind == "OBJECT":
             # Sub-object — select its id and name.
             # All Monday.com entity types (Board, Item, Group…) have id + name.
-            parts.append(f"{f['name']} {{ id name }}")
+            parts.append(f"{field_definition['name']} {{ id name }}")
 
     return ("{ " + " ".join(parts) + " }") if parts else "{ id name }"

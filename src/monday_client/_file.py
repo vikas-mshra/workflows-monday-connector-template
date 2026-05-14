@@ -43,8 +43,8 @@ def run_monday_file_upload(
                     f"Monday.com file upload failed after {_MAX_RETRIES} retries "
                     f"(status {response.status_code})"
                 )
-            wait = int(response.headers.get("Retry-After", 2 ** attempt))
-            time.sleep(wait)
+            retry_wait_seconds = int(response.headers.get("Retry-After", 2 ** attempt))
+            time.sleep(retry_wait_seconds)
             continue
 
         response.raise_for_status()
