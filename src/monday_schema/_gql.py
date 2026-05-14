@@ -32,7 +32,9 @@ def _build_vars(args: list, record: dict, index: int) -> tuple:
 
     Walks the introspection args for one record and returns
     (var_decls, arg_strings, variables, missing_required) ready to splice
-    into a batched GQL operation.
+    into a batched GQL operation. Collecting missing-required names in the
+    same pass is free (we're already iterating) and gives the user a clear
+    `"<field> is required"` error instead of Monday.com's GraphQL error.
     """
     s = str(index)
     var_decls = []
@@ -69,7 +71,7 @@ def _build_vars(args: list, record: dict, index: int) -> tuple:
             # Monday.com's JSON scalar expects a JSON string (not a parsed object).
             # If the value is a dict (e.g. sent as an object from the form), stringify it.
             # If it's already a string (from CodeblockWidget), strip trailing commas
-            # and validate it's well-formed before passing through.
+            # so Monday.com's parser accepts it.
             if actual_kind == "SCALAR" and actual_name == "JSON":
                 if isinstance(value, dict):
                     value = json.dumps(value)

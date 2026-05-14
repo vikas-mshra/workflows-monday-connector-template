@@ -73,7 +73,9 @@ def execute():
         else:
             selection = "" if rt.get("kind") in ("SCALAR", "ENUM") else "{ id name }"
 
-        # Validate and build query vars in a single pass.
+        # Build query vars per record. build_query_vars also collects any
+        # missing required fields in the same pass — we raise a clear ManagedError
+        # instead of letting the request reach Monday.com.
         var_decls = []
         alias_blocks = []
         variables = {}

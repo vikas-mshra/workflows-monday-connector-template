@@ -114,11 +114,9 @@ def execute():
                 metadata={"affected_rows": len(results)},
             )
 
-        # Validate and build mutation vars in a single pass.
-        # build_mutation_vars resolves each arg's type, extracts the value from the record,
-        # and returns the GQL variable declarations, argument strings, and variable values
-        # needed to construct the mutation. If any required field is missing it raises
-        # immediately — nothing is sent to Monday.com until all records are clean.
+        # Build mutation vars per record. build_mutation_vars also collects any
+        # missing required fields in the same pass — we raise a clear ManagedError
+        # instead of letting the request reach Monday.com.
         var_decls = []
         alias_blocks = []
         variables = {}
