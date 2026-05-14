@@ -9,7 +9,7 @@ gunicorn==22.0.0
 ## Add your additional requirements here
 authlib==1.1.0
 sentry-sdk[Flask]
-graphql-core
+graphql-core==3.2.8
 
 # Core
 pydantic>=2.0.0
