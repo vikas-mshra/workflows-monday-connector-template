@@ -1,3 +1,4 @@
-module_settings:
-  module_name: "Attach"
-  module_description: "Adds or links existing elements—such as users, teams, files, or content—to an item, board, or workspace without creating new standalone entities."
+name: "Attach"
+description: "Adds or links existing elements—such as users, teams, files, or content—to an item, board, or workspace without creating new standalone entities."
+version: "1"
+category: "monday_crm"

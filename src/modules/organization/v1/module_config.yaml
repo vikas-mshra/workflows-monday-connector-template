@@ -1,3 +1,4 @@
-module_settings:
-  module_name: "Organization"
-  module_description: "Moving and connecting objects"
+name: "Organization"
+description: "Moves and connects existing entities—such as items, groups, or boards—across workspaces, folders, and parent containers to restructure your Monday.com account."
+version: "1"
+category: "monday_crm"
