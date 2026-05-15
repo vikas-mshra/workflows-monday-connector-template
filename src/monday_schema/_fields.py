@@ -79,7 +79,6 @@ def _enum_field(
         "id": name,
         "type": "string",
         "label": label,
-        "default": default_value or "",
         "choices": {
             "values": [
                 {"value": v["name"], "label": humanize(v["name"])} for v in enum_values
@@ -90,6 +89,11 @@ def _enum_field(
         if required
         else {"pattern": ".*"},
     }
+
+    # making sure the default value is in the enum values
+    if default_value and default_value in [v["name"] for v in enum_values]:
+        field["default"] = default_value
+
     if description:
         field["description"] = description
     return field
