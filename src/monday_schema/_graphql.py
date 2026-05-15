@@ -85,10 +85,8 @@ def _build_operation_variables(args: list, record: dict, index: int) -> tuple:
                 if required:
                     missing_required.append(name)
                 continue
-            # For non-String scalars (Boolean, Int, ID, Float, JSON, etc.), an empty
-            # string from the form means the user left the field blank — skip it.
-            # String scalars can legitimately be empty strings, so we pass those through.
-            if actual_kind == "SCALAR" and actual_name != "String" and value == "":
+            # An empty string from the form means the user left the field blank — skip it.
+            if actual_kind == "SCALAR" and value == "":
                 if required:
                     missing_required.append(name)
                 continue
