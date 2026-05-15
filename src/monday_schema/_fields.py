@@ -220,6 +220,10 @@ def _object_field(
         field_description = input_field.get("description") or ""
         field_default_value = input_field.get("defaultValue")
         field_type_info, field_required = _unwrap_non_null_fully(input_field["type"])
+        # If the parent object is optional, its sub-fields are only required when
+        # the parent is actually provided — not enforced in the UI.
+        if not required:
+            field_required = False
         field_kind = field_type_info.get("kind")
         field_type_name = field_type_info.get("name")
 
