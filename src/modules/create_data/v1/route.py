@@ -55,7 +55,7 @@ def execute():
         # Strip NON_NULL wrapper to get the base return kind.
         return_type = mutation_info["return_type"]
         base_return_kind = (return_type.get("ofType") or return_type).get("kind")
-        selection = "" if base_return_kind in ("SCALAR", "ENUM") else "{ id name }"
+        selection = "" if base_return_kind in ("SCALAR", "ENUM") else "{ id }"
 
         # Build mutation vars per record. build_mutation_vars also collects any
         # missing required fields in the same pass — we raise a clear ManagedError
