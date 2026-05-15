@@ -1,3 +1,0 @@
-module_settings:
-  module_name: "Update"
-  module_description: "Modifies existing entities—such as boards, items, groups, or workspaces—by changing their attributes, metadata, or relationships in bulk or individually."
