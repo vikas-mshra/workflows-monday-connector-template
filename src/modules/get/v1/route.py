@@ -93,9 +93,8 @@ def execute():
                 f"record_{record_index}: {object_type}({', '.join(arg_strings)}) {selection}".strip()
             )
 
-        if not var_decls:
-            raise ManagedError(f"No arguments provided for {object_type}")
-        gql_query = f"query ({', '.join(var_decls)}) {{ {' '.join(alias_blocks)} }}"
+        var_clause = f"({', '.join(var_decls)})" if var_decls else ""
+        gql_query = f"query {var_clause} {{ {' '.join(alias_blocks)} }}"
 
         response = requests.post(
             MONDAY_API_URL,
