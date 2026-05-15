@@ -26,6 +26,17 @@ def _gql_type_string(type_info: dict) -> str:
     return type_info["name"]
 
 
+def _is_empty_input(value) -> bool:
+    """True if a value should be omitted: None, empty string, empty dict, or a dict
+    whose values are all recursively empty. Prevents passing {} or {"sub": {}} for
+    INPUT_OBJECT args, which Monday.com rejects with VALIDATION_INVALID_TYPE_VARIABLE."""
+    if value is None or value == "":
+        return True
+    if isinstance(value, dict):
+        return not value or all(_is_empty_input(v) for v in value.values())
+    return False
+
+
 def _build_operation_variables(args: list, record: dict, index: int) -> tuple:
     """
     Shared core for build_mutation_vars and build_query_vars.
@@ -65,6 +76,12 @@ def _build_operation_variables(args: list, record: dict, index: int) -> tuple:
         else:
             value = record.get(name)
             if value is None:
+                if required:
+                    missing_required.append(name)
+                continue
+            # INPUT_OBJECT args with all-empty sub-fields (e.g. {"calculated": {}})
+            # fail Monday.com's type validation — omit them entirely.
+            if actual_kind == "INPUT_OBJECT" and _is_empty_input(value):
                 if required:
                     missing_required.append(name)
                 continue
