@@ -68,6 +68,13 @@ def _build_operation_variables(args: list, record: dict, index: int) -> tuple:
                 if required:
                     missing_required.append(name)
                 continue
+            # For non-String scalars (Boolean, Int, ID, Float, JSON, etc.), an empty
+            # string from the form means the user left the field blank — skip it.
+            # String scalars can legitimately be empty strings, so we pass those through.
+            if actual_kind == "SCALAR" and actual_name != "String" and value == "":
+                if required:
+                    missing_required.append(name)
+                continue
             # Monday.com's JSON scalar expects a JSON string (not a parsed object).
             # If the value is a dict (e.g. sent as an object from the form), stringify it.
             # If it's already a string (from CodeblockWidget), strip trailing commas
