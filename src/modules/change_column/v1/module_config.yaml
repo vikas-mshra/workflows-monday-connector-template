@@ -1,3 +1,3 @@
 module_settings:
-  module_name: "Change Column"
-  module_description: "Updates column definitions and values for items, including metadata, titles, and one or multiple column values across simple and complex column types."
+  module_name: "Update/Edit"
+  module_description: "Modifies existing entities—such as boards, items, groups, or workspaces—by updating attributes, metadata, relationships, column definitions, titles, and column values in bulk or individually."

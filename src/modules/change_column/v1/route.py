@@ -38,7 +38,7 @@ def execute():
             "Content-Type": "application/json",
         }
 
-        # Records are keyed by object_type in the payload (e.g. "change_column": [...])
+        # Records are keyed by object_type in the payload (e.g. "change_*, update_*": [...])
         records = data.get(object_type)
         if not records:
             raise ManagedError("Missing records parameter")
@@ -73,7 +73,7 @@ def execute():
             var_decls.extend(record_var_decls)
             variables.update(record_variables)
             # Each record gets an alias (record_0, record_1, …) so all records
-            # are created in a single HTTP round-trip and results can be mapped back by index.
+            # are updated/changed in a single HTTP round-trip and results can be mapped back by index.
             alias_blocks.append(
                 f"record_{record_index}: {object_type}({', '.join(arg_strings)}) {selection}".strip()
             )
@@ -122,10 +122,14 @@ def content():
         lambda fields: [
             {
                 "value": f["name"],
-                "label": humanize(f["name"].removeprefix("change_")),
+                "label": humanize(f["name"]),
             }
             for f in fields
-            if f["name"].startswith("change_") and "column" in f["name"]
+            if (
+                f["name"].startswith("update_")
+                or f["name"].startswith("batch_")
+                or (f["name"].startswith("change_") and "column" in f["name"])
+            )
         ],
     )
 
@@ -162,8 +166,8 @@ def schema():
         args = get_mutation_args(object_type, api_key)["args"]
         fields, ui_order = build_schema_from_args(args, api_key)
 
-        # Wrap the generated fields in an array field so the user can change
-        # multiple columns in one workflow execution.
+        # Wrap the generated fields in an array field so the user can update/change
+        # multiple records/columns in one workflow execution.
         return Response(
             data={
                 "schema": {
@@ -174,7 +178,7 @@ def schema():
                             "id": object_type,
                             "type": "array",
                             "label": f"{humanize(object_type)}",
-                            "description": f"List of {humanize(object_type)} columns to change",
+                            "description": f"List of {humanize(object_type)} to update/edit",
                             "default": [{}],
                             "items": {
                                 "type": "object",
