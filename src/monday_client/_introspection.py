@@ -43,6 +43,7 @@ def get_mutation_args(object_type: str, token: str) -> dict:
                     args {{
                         name
                         description
+                        defaultValue
                         type {{ {_ARG_TYPE_FRAGMENT} }}
                     }}
                 }}
@@ -72,6 +73,7 @@ def get_query_args(object_type: str, token: str) -> dict:
                     args {{
                         name
                         description
+                        defaultValue
                         type {{ {_ARG_TYPE_FRAGMENT} }}
                     }}
                 }}

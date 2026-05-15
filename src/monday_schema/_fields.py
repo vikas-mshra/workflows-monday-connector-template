@@ -1,3 +1,5 @@
+import json
+
 from src.monday_client import run_monday_query
 
 # Maps Monday.com GraphQL scalar type names to Stacksync field type strings.
@@ -55,7 +57,9 @@ def _unwrap_non_null_fully(type_info: dict) -> tuple:
     return current_type, required
 
 
-def _enum_field(name, label, description, enum_name, required, token) -> dict:
+def _enum_field(
+    name, label, description, enum_name, required, token, default_value=None
+) -> dict:
     """
     Builds a SelectWidget field by fetching the enum's values via introspection.
     Always queries the API so new enum members appear automatically.
@@ -75,7 +79,7 @@ def _enum_field(name, label, description, enum_name, required, token) -> dict:
         "id": name,
         "type": "string",
         "label": label,
-        "default": "",
+        "default": default_value or "",
         "choices": {
             "values": [
                 {"value": v["name"], "label": humanize(v["name"])} for v in enum_values
@@ -91,7 +95,9 @@ def _enum_field(name, label, description, enum_name, required, token) -> dict:
     return field
 
 
-def _scalar_field(name, label, description, scalar_name, required) -> dict:
+def _scalar_field(
+    name, label, description, scalar_name, required, default_value=None
+) -> dict:
     """Builds a plain input field for a GraphQL scalar arg."""
     field_type = SCALAR_TYPE_MAP.get(scalar_name, "string")
     field = {
@@ -100,6 +106,11 @@ def _scalar_field(name, label, description, scalar_name, required) -> dict:
         "label": label,
         "default": "",
     }
+    if default_value is not None:
+        try:
+            field["default"] = json.loads(default_value)
+        except (json.JSONDecodeError, ValueError):
+            field["default"] = default_value
     if description:
         field["description"] = description
     if required:
@@ -203,6 +214,7 @@ def _object_field(
         field_name = input_field["name"]
         field_label = humanize(field_name)
         field_description = input_field.get("description") or ""
+        field_default_value = input_field.get("defaultValue")
         field_type_info, field_required = _unwrap_non_null_fully(input_field["type"])
         field_kind = field_type_info.get("kind")
         field_type_name = field_type_info.get("name")
@@ -214,6 +226,7 @@ def _object_field(
                 field_description,
                 field_type_name,
                 field_required,
+                field_default_value,
             )
         elif field_kind == "ENUM":
             sub_field = _enum_field(
@@ -223,6 +236,7 @@ def _object_field(
                 field_type_name,
                 field_required,
                 token,
+                field_default_value,
             )
         elif field_kind == "LIST":
             element_type, _ = _unwrap_non_null_fully(
@@ -315,12 +329,17 @@ def build_schema_from_args(args: list, token: str) -> tuple:
         name = arg["name"]
         label = humanize(name)
         description = arg.get("description", "")
+        default_value = arg.get("defaultValue")
         actual_kind, actual_name, required = _extract_inner_type(arg["type"])
 
         if actual_kind == "ENUM":
-            field = _enum_field(name, label, description, actual_name, required, token)
+            field = _enum_field(
+                name, label, description, actual_name, required, token, default_value
+            )
         elif actual_kind == "SCALAR":
-            field = _scalar_field(name, label, description, actual_name, required)
+            field = _scalar_field(
+                name, label, description, actual_name, required, default_value
+            )
         elif actual_kind == "LIST":
             # _extract_inner_type discards the type dict; re-peel to get the LIST node
             # so we can walk into its ofType and identify the element type.
