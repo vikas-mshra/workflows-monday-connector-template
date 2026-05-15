@@ -71,19 +71,24 @@ def _enum_field(name, label, description, enum_name, required, token) -> dict:
     result = run_monday_query(query=query, token=token)
     enum_values = result["data"]["__type"]["enumValues"]
 
-    return {
+    field = {
         "id": name,
         "type": "string",
         "label": label,
-        "description": description,
-        "validation": {"required": required},
+        "default": "",
         "choices": {
             "values": [
                 {"value": v["name"], "label": humanize(v["name"])} for v in enum_values
             ]
         },
         "ui_options": {"ui_widget": "SelectWidget"},
+        "validation": {"pattern": ".*", "required": True}
+        if required
+        else {"pattern": ".*"},
     }
+    if description:
+        field["description"] = description
+    return field
 
 
 def _scalar_field(name, label, description, scalar_name, required) -> dict:
@@ -93,16 +98,21 @@ def _scalar_field(name, label, description, scalar_name, required) -> dict:
         "id": name,
         "type": field_type,
         "label": label,
-        "description": description,
-        "validation": {"required": required},
+        "default": "",
     }
+    if description:
+        field["description"] = description
+    if required:
+        field["validation"] = {"required": True}
     ui_options = SCALAR_UI_OPTIONS_MAP.get(scalar_name)
     if ui_options:
         field["ui_options"] = ui_options
     return field
 
 
-def _array_field(name, label, description, required, item_fields=None, item_ui_order=None) -> dict:
+def _array_field(
+    name, label, description, required, item_fields=None, item_ui_order=None
+) -> dict:
     """Builds a repeatable list field for a GraphQL LIST arg.
 
     Pass item_fields + item_ui_order to get typed items (e.g. for LIST(INPUT_OBJECT)).
@@ -111,33 +121,40 @@ def _array_field(name, label, description, required, item_fields=None, item_ui_o
     """
     if item_fields is None:
         item_name = name.rstrip("s")
-        item_fields = [
-            {
-                "id": item_name,
-                "type": "string",
-                "label": humanize(item_name),
-                "description": description.rstrip("s") if description else "",
-                "validation": {"required": False},
-            }
-        ]
+        item_field = {
+            "id": item_name,
+            "type": "string",
+            "label": humanize(item_name),
+            "default": "",
+        }
+        if description:
+            item_field["description"] = description.rstrip("s")
+        item_fields = [item_field]
         item_ui_order = [item_name]
-    return {
+
+    field = {
         "id": name,
         "type": "array",
         "label": label,
-        "description": description,
-        "default": [{}],
+        "default": [{}] if required else [],
         "items": {
             "type": "object",
             "default": {},
-            "fields": item_fields,
             "ui_options": {"ui_order": item_ui_order},
+            "fields": item_fields,
         },
-        "validation": {"min_items": 1} if required else {},
+        "validation": {"required": True, "min_items": 1}
+        if required
+        else {"required": False, "min_items": 0},
     }
+    if description:
+        field["description"] = description
+    return field
 
 
-def _object_field(name, label, description, object_name, required, token, visited=None) -> dict:
+def _object_field(
+    name, label, description, object_name, required, token, visited=None
+) -> dict:
     """
     Builds a grouped object field for a GraphQL INPUT_OBJECT arg.
 
@@ -191,47 +208,98 @@ def _object_field(name, label, description, object_name, required, token, visite
         field_type_name = field_type_info.get("name")
 
         if field_kind == "SCALAR":
-            sub_field = _scalar_field(field_name, field_label, field_description, field_type_name, field_required)
+            sub_field = _scalar_field(
+                field_name,
+                field_label,
+                field_description,
+                field_type_name,
+                field_required,
+            )
         elif field_kind == "ENUM":
-            sub_field = _enum_field(field_name, field_label, field_description, field_type_name, field_required, token)
+            sub_field = _enum_field(
+                field_name,
+                field_label,
+                field_description,
+                field_type_name,
+                field_required,
+                token,
+            )
         elif field_kind == "LIST":
-            element_type, _ = _unwrap_non_null_fully(field_type_info.get("ofType") or {})
+            element_type, _ = _unwrap_non_null_fully(
+                field_type_info.get("ofType") or {}
+            )
             element_kind = element_type.get("kind")
             element_type_name = element_type.get("name")
             # Guard against self-referential lists (e.g. ItemsQueryGroup.groups -> ItemsQueryGroup).
             if element_kind == "INPUT_OBJECT" and element_type_name not in visited:
-                nested = _object_field(field_name, field_label, field_description, element_type_name, False, token, visited)
+                nested = _object_field(
+                    field_name,
+                    field_label,
+                    field_description,
+                    element_type_name,
+                    False,
+                    token,
+                    visited,
+                )
                 sub_field = _array_field(
-                    field_name, field_label, field_description, field_required,
+                    field_name,
+                    field_label,
+                    field_description,
+                    field_required,
                     item_fields=nested["fields"],
                     item_ui_order=nested["ui_options"]["ui_order"],
                 )
             elif element_kind == "ENUM" and element_type_name:
                 item_name = field_name.rstrip("s") or field_name
-                item_field = _enum_field(item_name, humanize(item_name), field_description, element_type_name, False, token)
-                sub_field = _array_field(field_name, field_label, field_description, field_required,
-                                         item_fields=[item_field], item_ui_order=[item_name])
+                item_field = _enum_field(
+                    item_name,
+                    humanize(item_name),
+                    field_description,
+                    element_type_name,
+                    False,
+                    token,
+                )
+                sub_field = _array_field(
+                    field_name,
+                    field_label,
+                    field_description,
+                    field_required,
+                    item_fields=[item_field],
+                    item_ui_order=[item_name],
+                )
             else:
-                sub_field = _array_field(field_name, field_label, field_description, field_required)
+                sub_field = _array_field(
+                    field_name, field_label, field_description, field_required
+                )
         elif field_kind == "INPUT_OBJECT":
             if field_type_name in visited:
                 continue
-            sub_field = _object_field(field_name, field_label, field_description, field_type_name, field_required, token, visited)
+            sub_field = _object_field(
+                field_name,
+                field_label,
+                field_description,
+                field_type_name,
+                field_required,
+                token,
+                visited,
+            )
         else:
             continue
 
         fields.append(sub_field)
         ui_order.append(field_name)
 
-    return {
+    field = {
         "id": name,
         "type": "object",
         "label": label,
-        "description": description,
+        "default": {},
         "fields": fields,
         "ui_options": {"ui_order": ui_order},
-        "validation": {"required": required},
     }
+    if description:
+        field["description"] = description
+    return field
 
 
 def build_schema_from_args(args: list, token: str) -> tuple:
@@ -261,17 +329,35 @@ def build_schema_from_args(args: list, token: str) -> tuple:
             element_kind = element_type.get("kind")
             element_type_name = element_type.get("name")
             if element_kind == "INPUT_OBJECT":
-                nested = _object_field(name, label, description, element_type_name, False, token)
+                nested = _object_field(
+                    name, label, description, element_type_name, False, token
+                )
                 field = _array_field(
-                    name, label, description, required,
+                    name,
+                    label,
+                    description,
+                    required,
                     item_fields=nested["fields"],
                     item_ui_order=nested["ui_options"]["ui_order"],
                 )
             elif element_kind == "ENUM" and element_type_name:
                 item_name = name.rstrip("s") or name
-                item_field = _enum_field(item_name, humanize(item_name), description, element_type_name, False, token)
-                field = _array_field(name, label, description, required,
-                                     item_fields=[item_field], item_ui_order=[item_name])
+                item_field = _enum_field(
+                    item_name,
+                    humanize(item_name),
+                    description,
+                    element_type_name,
+                    False,
+                    token,
+                )
+                field = _array_field(
+                    name,
+                    label,
+                    description,
+                    required,
+                    item_fields=[item_field],
+                    item_ui_order=[item_name],
+                )
             else:
                 field = _array_field(name, label, description, required)
         elif actual_kind == "INPUT_OBJECT":
