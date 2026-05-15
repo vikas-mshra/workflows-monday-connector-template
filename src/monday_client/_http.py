@@ -31,7 +31,7 @@ def run_monday_query(query: str, token: str, variables: dict = None):
         payload["variables"] = variables
 
     for attempt in range(len(_RETRY_DELAY_SECONDS) + 1):
-        response = requests.post(MONDAY_API_URL, headers=headers, json=payload)
+        response = requests.post(MONDAY_API_URL, headers=headers, json=payload, timeout=30)
 
         if response.status_code == 429 or response.status_code >= 500:
             if attempt == len(_RETRY_DELAY_SECONDS):
