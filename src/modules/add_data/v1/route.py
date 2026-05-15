@@ -3,7 +3,7 @@ from flask import request as flask_request
 from workflows_cdk import ManagedError, Request, Response
 
 from main import router
-from src.monday_client import get_mutation_args, run_monday_file_upload
+from src.monday_client import get_mutation_args
 from src.monday_config import (
     BASE_FIELDS,
     BASE_METADATA,
@@ -59,69 +59,6 @@ def execute():
 
         return_type = mutation_info["return_type"]
         selection = build_selection(return_type, api_key)
-
-        # If any arg is a File scalar, Monday.com requires a multipart upload
-        # to /v2/file — the standard JSON transport cannot carry binary data.
-        file_arg_name = next(
-            (
-                arg["name"]
-                for arg in args
-                if (arg["type"].get("ofType") or arg["type"]).get("name") == "File"
-            ),
-            None,
-        )
-
-        if file_arg_name:
-            # File mutations cannot be batched via aliases — one multipart request per record.
-            # The record's file field is expected to be a URL; the bytes are downloaded here
-            # and forwarded to Monday.com.
-            non_file_args = [a for a in args if a["name"] != file_arg_name]
-            results = []
-            for record_index, record in enumerate(records):
-                record_var_decls, arg_strings, record_variables, missing = (
-                    build_mutation_vars(non_file_args, record, record_index)
-                )
-                if missing:
-                    raise ManagedError(f"{missing[0]} is required")
-                record_var_decls.append("$file: File!")
-                arg_strings.append(f"{file_arg_name}: $file")
-                file_mutation = f"mutation ({', '.join(record_var_decls)}) {{ {object_type}({', '.join(arg_strings)}) {selection} }}"
-
-                file_url = record.get(file_arg_name)
-                if not file_url:
-                    raise ManagedError(
-                        f"Missing {file_arg_name} for record {record_index + 1}"
-                    )
-                file_download_response = requests.get(file_url)
-                file_download_response.raise_for_status()
-                filename = file_url.split("/")[-1].split("?")[0] or "upload"
-
-                api_result = run_monday_file_upload(
-                    file_mutation,
-                    record_variables,
-                    file_download_response.content,
-                    filename,
-                    api_key,
-                )
-                if "errors" in api_result:
-                    raise ManagedError(str(api_result["errors"]))
-
-                result_data = (api_result.get("data") or {}).get(object_type)
-                if result_data is None:
-                    raise ManagedError(
-                        f"No data returned for record {record_index + 1}"
-                    )
-                result_entry = {"success": True}
-                if isinstance(result_data, dict):
-                    result_entry.update(result_data)
-                elif isinstance(result_data, list):
-                    result_entry["items"] = result_data
-                results.append(result_entry)
-
-            return Response(
-                data={"results": results},
-                metadata={"affected_rows": len(results)},
-            )
 
         # Build mutation vars per record. build_mutation_vars also collects any
         # missing required fields in the same pass — we raise a clear ManagedError
@@ -190,10 +127,10 @@ def content():
         lambda fields: [
             {
                 "value": f["name"],
-                "label": humanize(f["name"].removeprefix("add_")),
+                "label": humanize(f["name"]),
             }
             for f in fields
-            if f["name"].startswith("add_")
+            if f["name"].startswith("add_") and not f["name"].startswith("add_file")
         ],
     )
 
