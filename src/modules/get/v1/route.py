@@ -1,5 +1,7 @@
 import requests
 from flask import request as flask_request
+from workflows_cdk import ManagedError, Request, Response
+
 from main import router
 from src.monday_client import get_query_args, run_monday_query
 from src.monday_config import (
@@ -10,7 +12,6 @@ from src.monday_config import (
 )
 from src.monday_content import build_content_response
 from src.monday_schema import build_query_vars, build_schema_from_args, humanize
-from workflows_cdk import ManagedError, Request, Response
 
 
 @router.route("/execute", methods=["GET", "POST"])
@@ -51,27 +52,49 @@ def execute():
         return_type = query_info["return_type"]
         unwrapped_return_type = return_type
         if unwrapped_return_type.get("kind") == "NON_NULL":
-            unwrapped_return_type = unwrapped_return_type.get("ofType") or unwrapped_return_type
+            unwrapped_return_type = (
+                unwrapped_return_type.get("ofType") or unwrapped_return_type
+            )
         if unwrapped_return_type.get("kind") == "LIST":
-            unwrapped_return_type = unwrapped_return_type.get("ofType") or unwrapped_return_type
+            unwrapped_return_type = (
+                unwrapped_return_type.get("ofType") or unwrapped_return_type
+            )
             if unwrapped_return_type.get("kind") == "NON_NULL":
-                unwrapped_return_type = unwrapped_return_type.get("ofType") or unwrapped_return_type
+                unwrapped_return_type = (
+                    unwrapped_return_type.get("ofType") or unwrapped_return_type
+                )
 
-        element_type = unwrapped_return_type.get("name") if unwrapped_return_type.get("kind") == "OBJECT" else None
+        element_type = (
+            unwrapped_return_type.get("name")
+            if unwrapped_return_type.get("kind") == "OBJECT"
+            else None
+        )
 
         if element_type:
             type_result = run_monday_query(
                 query=f'{{ __type(name: "{element_type}") {{ fields {{ name type {{ kind ofType {{ kind }} }} }} }} }}',
                 token=api_key,
             )
-            type_fields = ((type_result["data"].get("__type") or {}).get("fields")) or []
+            type_fields = (
+                (type_result["data"].get("__type") or {}).get("fields")
+            ) or []
             scalar_names = [
-                f["name"] for f in type_fields
-                if (f["type"].get("ofType") or f["type"]).get("kind") in ("SCALAR", "ENUM")
+                f["name"]
+                for f in type_fields
+                if (f["type"].get("ofType") or f["type"]).get("kind")
+                in ("SCALAR", "ENUM")
             ]
-            selection = ("{ " + " ".join(scalar_names) + " }") if scalar_names else "{ id name }"
+            selection = (
+                ("{ " + " ".join(scalar_names) + " }")
+                if scalar_names
+                else "{ id name }"
+            )
         else:
-            selection = "" if unwrapped_return_type.get("kind") in ("SCALAR", "ENUM") else "{ id name }"
+            selection = (
+                ""
+                if unwrapped_return_type.get("kind") in ("SCALAR", "ENUM")
+                else "{ id name }"
+            )
 
         # Build query vars per record. build_query_vars also collects any
         # missing required fields in the same pass — we raise a clear ManagedError

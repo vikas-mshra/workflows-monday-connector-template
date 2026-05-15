@@ -1,5 +1,7 @@
 import requests
 from flask import request as flask_request
+from workflows_cdk import ManagedError, Request, Response
+
 from main import router
 from src.monday_client import get_mutation_args
 from src.monday_config import (
@@ -15,7 +17,6 @@ from src.monday_schema import (
     build_selection,
     humanize,
 )
-from workflows_cdk import ManagedError, Request, Response
 
 
 @router.route("/execute", methods=["GET", "POST"])
@@ -67,8 +68,8 @@ def execute():
         variables = {}
 
         for record_index, record in enumerate(records):
-            record_var_decls, arg_strings, record_variables, missing = build_mutation_vars(
-                args, record, record_index
+            record_var_decls, arg_strings, record_variables, missing = (
+                build_mutation_vars(args, record, record_index)
             )
             if missing:
                 raise ManagedError(f"{missing[0]} is required")
