@@ -128,6 +128,7 @@ def content():
             if (
                 f["name"].startswith("update_")
                 or f["name"].startswith("batch_")
+                or f["name"].startswith("edit_")
                 or (f["name"].startswith("change_") and "column" in f["name"])
             )
         ],
