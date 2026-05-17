@@ -78,6 +78,11 @@ def build_request_variables(args: list, record: dict, index: int) -> tuple:
                 if required:
                     missing_required.append(name)
                 continue
+            # Monday.com IDs are strings (and routinely exceed 2^53). Coerce so
+            # numeric inputs from the form don't get round-tripped through a
+            # JS double and lose precision.
+            if actual_kind == "SCALAR" and actual_name == "ID":
+                value = str(value)
             # Monday.com's JSON scalar expects a JSON string (not a parsed object).
             # If the value is a dict (e.g. sent as an object from the form), stringify it.
             # If it's already a string (from CodeblockWidget), strip trailing commas

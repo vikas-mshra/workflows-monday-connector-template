@@ -4,7 +4,7 @@ import json
 SCALAR_TYPE_MAP = {
     "String": "string",
     "Boolean": "boolean",
-    "ID": "integer",
+    "ID": "string",
     "Int": "integer",
     "Float": "string",
     "JSON": "string",
