@@ -28,7 +28,7 @@ def humanize(name: str) -> str:
     return name.replace("_", " ").title()
 
 
-def _extract_inner_type(type_info: dict) -> tuple:
+def unwrap_non_null_single(type_info: dict) -> tuple:
     """
     Unwraps one level of NON_NULL and returns (kind, name, required).
 
@@ -41,11 +41,11 @@ def _extract_inner_type(type_info: dict) -> tuple:
     return type_info["kind"], type_info.get("name"), False
 
 
-def _unwrap_non_null_fully(type_info: dict) -> tuple:
+def unwrap_non_null_fully(type_info: dict) -> tuple:
     """
     Fully unwraps all NON_NULL wrappers, returning (inner_type_dict, required).
 
-    Unlike _extract_inner_type (which peels exactly one layer and returns only kind/name),
+    Unlike unwrap_non_null_single (which peels exactly one layer and returns only kind/name),
     this returns the actual type dict so callers can continue walking ofType — necessary
     for stacked wrappers like NON_NULL(LIST(NON_NULL(INPUT_OBJECT))).
     """
@@ -57,7 +57,7 @@ def _unwrap_non_null_fully(type_info: dict) -> tuple:
     return current_type, required
 
 
-def _enum_field(
+def build_enum_field(
     name, label, description, enum_name, required, token, default_value=None
 ) -> dict:
     """
@@ -99,7 +99,7 @@ def _enum_field(
     return field
 
 
-def _scalar_field(
+def build_scalar_field(
     name, label, description, scalar_name, required, default_value=None
 ) -> dict:
     """Builds a plain input field for a GraphQL scalar arg."""
@@ -125,7 +125,7 @@ def _scalar_field(
     return field
 
 
-def _array_field(
+def build_array_field(
     name, label, description, required, item_fields=None, item_ui_order=None
 ) -> dict:
     """Builds a repeatable list field for a GraphQL LIST arg.
@@ -167,7 +167,7 @@ def _array_field(
     return field
 
 
-def _object_field(
+def build_object_field(
     name, label, description, object_name, required, token, visited=None
 ) -> dict:
     """
@@ -219,7 +219,7 @@ def _object_field(
         field_label = humanize(field_name)
         field_description = input_field.get("description") or ""
         field_default_value = input_field.get("defaultValue")
-        field_type_info, field_required = _unwrap_non_null_fully(input_field["type"])
+        field_type_info, field_required = unwrap_non_null_fully(input_field["type"])
         # If the parent object is optional, its sub-fields are only required when
         # the parent is actually provided — not enforced in the UI.
         if not required:
@@ -228,7 +228,7 @@ def _object_field(
         field_type_name = field_type_info.get("name")
 
         if field_kind == "SCALAR":
-            sub_field = _scalar_field(
+            sub_field = build_scalar_field(
                 field_name,
                 field_label,
                 field_description,
@@ -237,7 +237,7 @@ def _object_field(
                 field_default_value,
             )
         elif field_kind == "ENUM":
-            sub_field = _enum_field(
+            sub_field = build_enum_field(
                 field_name,
                 field_label,
                 field_description,
@@ -247,14 +247,14 @@ def _object_field(
                 field_default_value,
             )
         elif field_kind == "LIST":
-            element_type, _ = _unwrap_non_null_fully(
+            element_type, _ = unwrap_non_null_fully(
                 field_type_info.get("ofType") or {}
             )
             element_kind = element_type.get("kind")
             element_type_name = element_type.get("name")
             # Guard against self-referential lists (e.g. ItemsQueryGroup.groups -> ItemsQueryGroup).
             if element_kind == "INPUT_OBJECT" and element_type_name not in visited:
-                nested = _object_field(
+                nested = build_object_field(
                     field_name,
                     field_label,
                     field_description,
@@ -263,7 +263,7 @@ def _object_field(
                     token,
                     visited,
                 )
-                sub_field = _array_field(
+                sub_field = build_array_field(
                     field_name,
                     field_label,
                     field_description,
@@ -273,7 +273,7 @@ def _object_field(
                 )
             elif element_kind == "ENUM" and element_type_name:
                 item_name = field_name.rstrip("s") or field_name
-                item_field = _enum_field(
+                item_field = build_enum_field(
                     item_name,
                     humanize(item_name),
                     field_description,
@@ -281,7 +281,7 @@ def _object_field(
                     False,
                     token,
                 )
-                sub_field = _array_field(
+                sub_field = build_array_field(
                     field_name,
                     field_label,
                     field_description,
@@ -290,13 +290,13 @@ def _object_field(
                     item_ui_order=[item_name],
                 )
             else:
-                sub_field = _array_field(
+                sub_field = build_array_field(
                     field_name, field_label, field_description, field_required
                 )
         elif field_kind == "INPUT_OBJECT":
             if field_type_name in visited:
                 continue
-            sub_field = _object_field(
+            sub_field = build_object_field(
                 field_name,
                 field_label,
                 field_description,
@@ -338,28 +338,28 @@ def build_schema_from_args(args: list, token: str) -> tuple:
         label = humanize(name)
         description = arg.get("description", "")
         default_value = arg.get("defaultValue")
-        actual_kind, actual_name, required = _extract_inner_type(arg["type"])
+        actual_kind, actual_name, required = unwrap_non_null_single(arg["type"])
 
         if actual_kind == "ENUM":
-            field = _enum_field(
+            field = build_enum_field(
                 name, label, description, actual_name, required, token, default_value
             )
         elif actual_kind == "SCALAR":
-            field = _scalar_field(
+            field = build_scalar_field(
                 name, label, description, actual_name, required, default_value
             )
         elif actual_kind == "LIST":
-            # _extract_inner_type discards the type dict; re-peel to get the LIST node
+            # unwrap_non_null_single discards the type dict; re-peel to get the LIST node
             # so we can walk into its ofType and identify the element type.
-            unwrapped_type, _ = _unwrap_non_null_fully(arg["type"])
-            element_type, _ = _unwrap_non_null_fully(unwrapped_type.get("ofType") or {})
+            unwrapped_type, _ = unwrap_non_null_fully(arg["type"])
+            element_type, _ = unwrap_non_null_fully(unwrapped_type.get("ofType") or {})
             element_kind = element_type.get("kind")
             element_type_name = element_type.get("name")
             if element_kind == "INPUT_OBJECT":
-                nested = _object_field(
+                nested = build_object_field(
                     name, label, description, element_type_name, False, token
                 )
-                field = _array_field(
+                field = build_array_field(
                     name,
                     label,
                     description,
@@ -369,7 +369,7 @@ def build_schema_from_args(args: list, token: str) -> tuple:
                 )
             elif element_kind == "ENUM" and element_type_name:
                 item_name = name.rstrip("s") or name
-                item_field = _enum_field(
+                item_field = build_enum_field(
                     item_name,
                     humanize(item_name),
                     description,
@@ -377,7 +377,7 @@ def build_schema_from_args(args: list, token: str) -> tuple:
                     False,
                     token,
                 )
-                field = _array_field(
+                field = build_array_field(
                     name,
                     label,
                     description,
@@ -386,9 +386,9 @@ def build_schema_from_args(args: list, token: str) -> tuple:
                     item_ui_order=[item_name],
                 )
             else:
-                field = _array_field(name, label, description, required)
+                field = build_array_field(name, label, description, required)
         elif actual_kind == "INPUT_OBJECT":
-            field = _object_field(
+            field = build_object_field(
                 name, label, description, actual_name, required, token
             )
         else:
