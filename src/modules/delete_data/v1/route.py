@@ -122,10 +122,10 @@ def content():
         lambda fields: [
             {
                 "value": f["name"],
-                "label": humanize(f["name"].removeprefix("delete_")),
+                "label": humanize(f["name"]),
             }
             for f in fields
-            if f["name"].startswith("delete_")
+            if f["name"].startswith("delete_") or f["name"].startswith("remove_")
         ],
     )
 
