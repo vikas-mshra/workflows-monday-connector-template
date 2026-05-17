@@ -124,7 +124,7 @@ def _build_array_field(
     a trailing 's' from the field name — a heuristic for untyped scalar lists.
     """
     if item_fields is None:
-        item_name = name.rstrip("s")
+        item_name = name.removesuffix("s")
         item_field = {
             "id": item_name,
             "type": "string",
@@ -132,7 +132,7 @@ def _build_array_field(
             "default": "",
         }
         if description:
-            item_field["description"] = description.rstrip("s")
+            item_field["description"] = description.removesuffix("s")
         item_fields = [item_field]
         item_ui_order = [item_name]
 
@@ -233,7 +233,7 @@ def _build_object_field(
                     item_ui_order=nested["ui_options"]["ui_order"],
                 )
             elif element_kind == "ENUM" and element_type_name:
-                item_name = field_name.rstrip("s") or field_name
+                item_name = field_name.removesuffix("s") or field_name
                 item_field = _build_enum_field(
                     item_name,
                     humanize(item_name),
@@ -332,7 +332,7 @@ def build_schema_from_args(args: list, type_map: dict) -> tuple:
                     item_ui_order=nested["ui_options"]["ui_order"],
                 )
             elif element_kind == "ENUM" and element_type_name:
-                item_name = name.rstrip("s") or name
+                item_name = name.removesuffix("s") or name
                 item_field = _build_enum_field(
                     item_name,
                     humanize(item_name),

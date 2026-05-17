@@ -48,7 +48,7 @@ def build_request_variables(args: list, record: dict, index: int) -> tuple:
         gql_type = _gql_type_string(arg["type"])
 
         if actual_kind == "LIST":
-            item_key = name.rstrip("s")
+            item_key = name.removesuffix("s")
             ids = [
                 str(item[item_key])
                 for item in (record.get(name) or [])
