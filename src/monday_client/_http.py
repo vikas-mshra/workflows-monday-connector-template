@@ -7,6 +7,13 @@ from workflows_cdk import ManagedError
 
 MONDAY_API_URL = "https://api.monday.com/v2"
 
+# Pin the Monday.com API version so a new quarterly default can't silently
+# change return shapes or rename args (which would break our introspection-
+# driven schema mid-flight). Bump deliberately after testing against the new
+# version. Current default per Monday.com docs: 2026-04.
+_MONDAY_API_VERSION = "2026-04"
+_USER_AGENT = "stacksync-monday-connector/1.0"
+
 # Seconds to wait before retry 1 and retry 2.
 _RETRY_DELAY_SECONDS = (3, 5)
 
@@ -25,7 +32,12 @@ def run_monday_query(query: str, token: str, variables: dict = None):
     except GraphQLSyntaxError as e:
         raise ManagedError(f"Invalid GraphQL syntax: {e.message}")
 
-    headers = {"Authorization": token, "Content-Type": "application/json"}
+    headers = {
+        "Authorization": token,
+        "Content-Type": "application/json",
+        "API-Version": _MONDAY_API_VERSION,
+        "User-Agent": _USER_AGENT,
+    }
     payload = {"query": query}
     if variables:
         payload["variables"] = variables
