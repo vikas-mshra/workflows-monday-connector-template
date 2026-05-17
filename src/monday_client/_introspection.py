@@ -83,11 +83,7 @@ def get_schema_type_map(token: str) -> dict:
             return type_map
 
     result = run_monday_query(query=_SCHEMA_QUERY, token=token)
-    type_map = {
-        t["name"]: t
-        for t in result["data"]["__schema"]["types"]
-        if t["name"]
-    }
+    type_map = {t["name"]: t for t in result["data"]["__schema"]["types"] if t["name"]}
     _type_map_cache[token] = (type_map, time.time())
     return type_map
 
@@ -129,8 +125,8 @@ def get_mutation_args(object_type: str, token: str) -> dict:
         "return_type": raw introspection type node for what the mutation returns
       }
 
-    - args       → used by build_mutation_vars to validate inputs and build GQL variables
-    - return_type → used by _build_selection to decide whether a selection set is needed
+    - args       → used by build_request_variables to validate inputs and build GQL variables
+    - return_type → used by build_response_selection to decide whether a selection set is needed
     """
     query = f"""
         query {{

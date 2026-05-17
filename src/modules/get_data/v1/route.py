@@ -4,9 +4,17 @@ from flask import request as flask_request
 from workflows_cdk import ManagedError, Request, Response
 
 from main import router
-from src.monday_client import get_query_args, run_monday_query
+from src.monday_client import (
+    get_query_args_from_map,
+    get_schema_type_map,
+    run_monday_query,
+)
 from src.monday_content import build_content_response
-from src.monday_schema import humanize, resolve_record_to_gql_args
+from src.monday_schema import (
+    build_request_variables,
+    build_response_selection,
+    humanize,
+)
 from src.utils.schema_loader import build_schema_response
 
 
@@ -31,72 +39,28 @@ def execute():
         if not records:
             raise ManagedError("Missing records parameter")
 
-        # Fetch args + return type for this query via introspection.
-        query_info = get_query_args(object_type, api_key)
+        # Fetch the cached schema type_map (one __schema call per token, 5 min TTL)
+        # and resolve this query's args + return type from it. args drive request
+        # variable building; return_type drives the response selection set.
+        type_map = get_schema_type_map(api_key)
+        query_info = get_query_args_from_map(object_type, type_map)
         args = query_info["args"]
         if not args:
             raise ManagedError(f"Unsupported object type: {object_type}")
 
-        # Unwrap the return type to find the element type name (e.g. Board from [Board]).
-        # Then introspect that type's fields and select only scalar/enum ones.
-        # This avoids hardcoding { id name } and returns all flat fields instead.
         return_type = query_info["return_type"]
-        unwrapped_return_type = return_type
-        if unwrapped_return_type.get("kind") == "NON_NULL":
-            unwrapped_return_type = (
-                unwrapped_return_type.get("ofType") or unwrapped_return_type
-            )
-        if unwrapped_return_type.get("kind") == "LIST":
-            unwrapped_return_type = (
-                unwrapped_return_type.get("ofType") or unwrapped_return_type
-            )
-            if unwrapped_return_type.get("kind") == "NON_NULL":
-                unwrapped_return_type = (
-                    unwrapped_return_type.get("ofType") or unwrapped_return_type
-                )
+        selection = build_response_selection(return_type, type_map)
 
-        element_type = (
-            unwrapped_return_type.get("name")
-            if unwrapped_return_type.get("kind") == "OBJECT"
-            else None
-        )
-
-        if element_type:
-            type_result = run_monday_query(
-                query=f'{{ __type(name: "{element_type}") {{ fields {{ name type {{ kind ofType {{ kind }} }} }} }} }}',
-                token=api_key,
-            )
-            type_fields = (
-                (type_result["data"].get("__type") or {}).get("fields")
-            ) or []
-            scalar_names = [
-                f["name"]
-                for f in type_fields
-                if (f["type"].get("ofType") or f["type"]).get("kind")
-                in ("SCALAR", "ENUM")
-            ]
-            selection = (
-                ("{ " + " ".join(scalar_names) + " }")
-                if scalar_names
-                else "{ id name }"
-            )
-        else:
-            selection = (
-                ""
-                if unwrapped_return_type.get("kind") in ("SCALAR", "ENUM")
-                else "{ id name }"
-            )
-
-        # Build query vars per record. build_query_vars also collects any
-        # missing required fields in the same pass — we raise a clear ManagedError
-        # instead of letting the request reach Monday.com.
+        # Build request variables per record. build_request_variables also collects
+        # any missing required fields in the same pass — we raise a clear
+        # ManagedError instead of letting the request reach Monday.com.
         var_decls = []
         alias_blocks = []
         variables = {}
 
         for record_index, record in enumerate(records):
             record_var_decls, arg_strings, record_variables, missing = (
-                resolve_record_to_gql_args(args, record, record_index)
+                build_request_variables(args, record, record_index)
             )
             if missing:
                 raise ManagedError(f"{missing[0]} is required")

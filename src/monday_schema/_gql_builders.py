@@ -24,10 +24,11 @@ def _is_empty_input(value) -> bool:
     return False
 
 
-def resolve_record_to_gql_args(args: list, record: dict, index: int) -> tuple:
+def build_request_variables(args: list, record: dict, index: int) -> tuple:
     """
-    Builds GQL variable declarations, arg strings, variables dict, and a list
-    of any missing required field names for one record in a batched operation.
+    Builds the GraphQL **request** side for one record in a batched operation:
+    variable declarations, inline arg strings, the variables dict to send, and
+    a list of any missing required field names.
 
     Works for both mutations and queries — callers use the same function
     regardless of operation type. Collecting missing-required names in the
@@ -95,20 +96,35 @@ def resolve_record_to_gql_args(args: list, record: dict, index: int) -> tuple:
     return var_decls, arg_strings, variables, missing_required
 
 
-def build_selection(return_type: dict, type_map: dict) -> str:
+def build_response_selection(return_type: dict, type_map: dict) -> str:
     """
-    Builds the GraphQL selection set string for a mutation's return type.
+    Builds the GraphQL **response** selection set for a mutation/query return type.
 
-    duplicate_* mutations return wrapper types (e.g. BoardDuplication) instead
-    of plain entities (Board, Item). These wrappers don't have id/name at the
-    top level, so we can't hardcode "{ id name }" like create/update do.
-    Instead, we resolve the return type's fields from type_map — built from the
-    single __schema call at the start of /schema — with no further API calls.
+    Works for any return type by resolving its fields from type_map (built once
+    per request from a single __schema call). For plain entities (Board, Item)
+    this lists every scalar/enum field. For wrapper types like BoardDuplication
+    — returned by duplicate_* mutations — it yields the wrapper's sub-object
+    selection (e.g. "{ board { id } }"). Hardcoded selections would not handle
+    both shapes, so we always introspect.
 
     Examples:
-      BoardDuplication  ->  "{ board { id name } }"
-      Board             ->  "{ id name ... }"   (scalar fields listed)
+      BoardDuplication  ->  "{ board { id } }"
+      Board             ->  "{ id name ... owner { id } groups { id } updates { id } ... }"
       JSON (scalar)     ->  ""                  (scalars need no selection set)
+
+    Design notes (future scope):
+      * Only goes ONE level deep into OBJECT / LIST(OBJECT) sub-fields, emitting
+        `{ id }` for them. See the inline comment on the OBJECT branch for the
+        rationale (no common human-readable field across Monday.com types).
+        Callers needing more than the id for a sub-object should do a follow-up
+        query using that id.
+      * Wrapper-unwrap logic here is inlined for now. For consistency with
+        build_schema_from_args (which uses `_extract_inner_type` and
+        `_unwrap_non_null_fully` from _schema_fields.py), this function could be
+        refactored to share those helpers — purely cosmetic, no behavior change.
+      * Sub-fields whose introspection declares required arguments (e.g.
+        Board.items_page(limit: Int!)) are filtered out — selecting them bare
+        would emit invalid GraphQL.
     """
     # Peel off NON_NULL wrapper to get to the actual type underneath.
     unwrapped_return_type = return_type
@@ -134,12 +150,18 @@ def build_selection(return_type: dict, type_map: dict) -> str:
 
     type_name = unwrapped_return_type.get("name")
     if not type_name:
-        return "{ id name }"
+        return "{ id }"
 
     fields = (type_map.get(type_name) or {}).get("fields") or []
 
     parts = []
     for field_definition in fields:
+        # Skip fields that require arguments — selecting them bare emits invalid GraphQL
+        # (e.g. Board.items_page(limit: Int!) would fail Monday.com's argument validation).
+        field_args = field_definition.get("args") or []
+        if any((arg.get("type") or {}).get("kind") == "NON_NULL" for arg in field_args):
+            continue
+
         field_type = field_definition["type"]
         if field_type.get("kind") == "NON_NULL":
             field_type = field_type.get("ofType") or field_type
@@ -149,8 +171,26 @@ def build_selection(return_type: dict, type_map: dict) -> str:
             # Plain value — select directly, e.g. "id", "name"
             parts.append(field_definition["name"])
         elif field_kind == "OBJECT":
-            # Sub-object — select its id and name.
-            # All Monday.com entity types (Board, Item, Group…) have id + name.
-            parts.append(f"{field_definition['name']} {{ id name }}")
+            # Only emit `id` for sub-objects. Monday.com entity types don't share
+            # a common human-readable field — Board/User use `name`, Group/View
+            # use `title`, Update uses `body`, ActivityLogType uses `event`, etc.
+            # — so any hardcoded label would break on at least one type. Pulling
+            # every scalar on every sub-object would generalize but bloats the
+            # response and risks Monday's complexity limits. `id` is universal and
+            # sufficient — callers who need details can fetch the sub-object with
+            # a follow-up request using the id.
+            parts.append(f"{field_definition['name']} {{ id }}")
+        elif field_kind == "LIST":
+            # Peel LIST and an optional inner NON_NULL to find the element kind.
+            element_type = field_type.get("ofType") or {}
+            if element_type.get("kind") == "NON_NULL":
+                element_type = element_type.get("ofType") or element_type
+            element_kind = element_type.get("kind")
+            if element_kind in ("SCALAR", "ENUM"):
+                parts.append(field_definition["name"])
+            elif element_kind == "OBJECT":
+                # Same rationale as the OBJECT branch — `id` only.
+                parts.append(f"{field_definition['name']} {{ id }}")
+            # Lists of INTERFACE / UNION are skipped — not used on Monday.com entity types.
 
-    return ("{ " + " ".join(parts) + " }") if parts else "{ id name }"
+    return ("{ " + " ".join(parts) + " }") if parts else "{ id }"

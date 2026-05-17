@@ -10,7 +10,11 @@ from src.monday_client import (
     run_monday_query,
 )
 from src.monday_content import build_content_response
-from src.monday_schema import build_selection, humanize, resolve_record_to_gql_args
+from src.monday_schema import (
+    build_request_variables,
+    build_response_selection,
+    humanize,
+)
 from src.utils.schema_loader import build_schema_response
 
 
@@ -49,7 +53,7 @@ def execute():
             raise ManagedError(f"Unsupported object type: {object_type}")
 
         return_type = mutation_info["return_type"]
-        selection = build_selection(return_type, type_map)
+        selection = build_response_selection(return_type, type_map)
 
         # Build mutation vars per record. build_mutation_vars also collects any
         # missing required fields in the same pass — we raise a clear ManagedError
@@ -60,7 +64,7 @@ def execute():
 
         for record_index, record in enumerate(records):
             record_var_decls, arg_strings, record_variables, missing = (
-                resolve_record_to_gql_args(args, record, record_index)
+                build_request_variables(args, record, record_index)
             )
             if missing:
                 raise ManagedError(f"{missing[0]} is required")
