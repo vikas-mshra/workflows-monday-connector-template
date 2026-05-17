@@ -1,15 +1,13 @@
+import json
+from pathlib import Path
+
 import requests
 from flask import request as flask_request
 from workflows_cdk import ManagedError, Request, Response
 
 from main import router
 from src.monday_client import get_mutation_args
-from src.monday_config import (
-    BASE_FIELDS,
-    BASE_METADATA,
-    BASE_UI_OPTIONS,
-    MONDAY_API_URL,
-)
+from src.monday_config import MONDAY_API_URL
 from src.monday_content import build_content_response
 from src.monday_schema import build_mutation_vars, build_schema_from_args, humanize
 
@@ -135,6 +133,10 @@ def content():
 @router.route("/schema", methods=["GET", "POST"])
 def schema():
     try:
+        schema_path = Path(__file__).parent / "schema.json"
+        with open(schema_path, "r") as f:
+            base_schema = json.load(f)
+
         request = Request(flask_request)
         data = request.data
 
@@ -142,21 +144,10 @@ def schema():
         object_type = form_data.get("object_type")
         api_key = form_data.get("api_key")
 
-        # Base schema: just the api_key + object_type selector fields.
         # Returned immediately if the user hasn't filled in the api_key or
         # hasn't selected an object_type yet.
-        response = Response(
-            data={
-                "schema": {
-                    "metadata": BASE_METADATA,
-                    "fields": BASE_FIELDS,
-                    "ui_options": BASE_UI_OPTIONS,
-                }
-            }
-        )
-
         if not api_key or not object_type:
-            return response
+            return Response(data={"schema": base_schema})
 
         # Use GraphQL introspection to discover the args for the selected mutation.
         # build_schema_from_args converts each arg into a form field definition,
@@ -166,30 +157,22 @@ def schema():
 
         # Wrap the generated fields in an array field so the user can create
         # multiple records in one workflow execution.
-        return Response(
-            data={
-                "schema": {
-                    "metadata": BASE_METADATA,
-                    "fields": [
-                        *BASE_FIELDS,
-                        {
-                            "id": object_type,
-                            "type": "array",
-                            "label": f"{humanize(object_type)} Records",
-                            "description": f"List of {humanize(object_type)} to create",
-                            "default": [{}],
-                            "items": {
-                                "type": "object",
-                                "default": {},
-                                "fields": fields,
-                                "ui_options": {"ui_order": ui_order},
-                            },
-                        },
-                    ],
-                    "ui_options": {"ui_order": ["api_key", "object_type", object_type]},
-                }
+        base_schema["fields"].append(
+            {
+                "id": object_type,
+                "type": "array",
+                "label": f"{humanize(object_type)} Records",
+                "description": f"List of {humanize(object_type)} to create",
+                "default": [{}],
+                "items": {
+                    "type": "object",
+                    "default": {},
+                    "fields": fields,
+                    "ui_options": {"ui_order": ui_order},
+                },
             }
         )
+        return Response(data={"schema": base_schema})
     except ManagedError as e:
         return Response.error(str(e))
     except Exception as e:

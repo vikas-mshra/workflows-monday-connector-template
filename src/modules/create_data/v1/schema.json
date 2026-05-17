@@ -23,9 +23,6 @@
       "on_action": {
         "load_schema": true
       },
-      "choices": {
-        "values": []
-      },
       "content": {
         "type": ["managed"],
         "content_objects": [
@@ -35,11 +32,14 @@
         ]
       },
       "ui_options": {
-        "ui_widget": "SelectWidget"
+        "ui_widget": "SelectWidget",
+        "placeholder": "Select an object"
       }
     }
   ],
   "ui_options": {
-    "ui_order": ["api_key", "object_type"]
+    "submitButtonLabel": "Create Data",
+    "showSubmitButton": true,
+    "showCancelButton": true
   }
 }
