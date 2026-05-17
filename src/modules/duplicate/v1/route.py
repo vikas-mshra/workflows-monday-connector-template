@@ -5,7 +5,7 @@ from flask import request as flask_request
 from workflows_cdk import ManagedError, Request, Response
 
 from main import router
-from src.monday_client import get_mutation_args
+from src.monday_client import get_mutation_args_from_map, get_schema_type_map
 from src.monday_config import MONDAY_API_URL
 from src.monday_content import build_content_response
 from src.monday_schema import (
@@ -49,13 +49,14 @@ def execute():
         # args drive validation and variable building; return_type determines
         # whether the mutation returns an object (needs "{ id name }") or a
         # scalar like JSON (no subfields — selection set must be omitted).
-        mutation_info = get_mutation_args(object_type, api_key)
+        type_map = get_schema_type_map(api_key)
+        mutation_info = get_mutation_args_from_map(object_type, type_map)
         args = mutation_info["args"]
         if not args:
             raise ManagedError(f"Unsupported object type: {object_type}")
 
         return_type = mutation_info["return_type"]
-        selection = build_selection(return_type, api_key)
+        selection = build_selection(return_type, type_map)
 
         # Build mutation vars per record. build_mutation_vars also collects any
         # missing required fields in the same pass — we raise a clear ManagedError
@@ -135,7 +136,7 @@ def schema():
     return build_schema_response(
         flask_request,
         Path(__file__).parent / "schema.json",
-        get_mutation_args,
+        "Mutation",
         humanize,
         lambda ot: f"List of {humanize(ot)}",
     )

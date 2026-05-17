@@ -1,20 +1,7 @@
 import json
 import re
 
-from src.monday_client import run_monday_query
-
-
-def _extract_inner_type(type_info: dict) -> tuple:
-    """
-    Unwraps one level of NON_NULL and returns (kind, name, required).
-
-    GraphQL marks required args as NON_NULL(actualType). We peel that wrapper
-    so callers can work with the real kind/name while still knowing it's required.
-    """
-    if type_info["kind"] == "NON_NULL":
-        of_type = type_info.get("ofType") or {}
-        return of_type.get("kind"), of_type.get("name"), True
-    return type_info["kind"], type_info.get("name"), False
+from ._schema_fields import _extract_inner_type
 
 
 def _gql_type_string(type_info: dict) -> str:
@@ -118,14 +105,15 @@ def build_query_vars(args: list, record: dict, index: int) -> tuple:
     return _build_operation_variables(args, record, index)
 
 
-def build_selection(return_type: dict, api_token: str) -> str:
+def build_selection(return_type: dict, type_map: dict) -> str:
     """
     Builds the GraphQL selection set string for a mutation's return type.
 
     duplicate_* mutations return wrapper types (e.g. BoardDuplication) instead
     of plain entities (Board, Item). These wrappers don't have id/name at the
     top level, so we can't hardcode "{ id name }" like create/update do.
-    Instead, we introspect the actual fields of the return type at runtime.
+    Instead, we resolve the return type's fields from type_map — built from the
+    single __schema call at the start of /schema — with no further API calls.
 
     Examples:
       BoardDuplication  ->  "{ board { id name } }"
@@ -156,11 +144,7 @@ def build_selection(return_type: dict, api_token: str) -> str:
     if not type_name:
         return "{ id name }"
 
-    result = run_monday_query(
-        query=f'{{ __type(name: "{type_name}") {{ fields {{ name type {{ kind name ofType {{ kind name }} }} }} }} }}',
-        token=api_token,
-    )
-    fields = ((result["data"].get("__type") or {}).get("fields")) or []
+    fields = (type_map.get(type_name) or {}).get("fields") or []
 
     parts = []
     for field_definition in fields:

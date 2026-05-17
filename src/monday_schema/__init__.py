@@ -1,5 +1,5 @@
-from ._fields import humanize, build_schema_from_args
-from ._graphql import build_mutation_vars, build_query_vars, build_selection
+from ._schema_fields import humanize, build_schema_from_args
+from ._gql_builders import build_mutation_vars, build_query_vars, build_selection
 
 __all__ = [
     "humanize",

@@ -1,28 +1,33 @@
 import json
 
-# workflows_cdk provides the core request/response abstractions and managed error handling
 from workflows_cdk import ManagedError, Request, Response
 
-# build_schema_from_args dynamically constructs field definitions from Monday.com introspection args
+from src.monday_client import (
+    get_mutation_args_from_map,
+    get_query_args_from_map,
+    get_schema_type_map,
+)
 from src.monday_schema import build_schema_from_args
 
 
-def build_schema_response(flask_request, schema_path, introspect_fn, label_fn, description_fn):
+def build_schema_response(
+    flask_request, schema_path, gql_root_type, label_fn, description_fn
+):
     """
     Builds and returns a dynamic schema response for a Monday.com connector endpoint.
 
     Loads a base JSON schema from disk, then — if the request contains a valid
-    `api_key` and `object_type` — introspects Monday.com to append a dynamically
-    generated array field (representing the selected object's columns/fields) to
-    the schema before returning it.
+    `api_key` and `object_type` — makes a single __schema introspection call to
+    build a type map, resolves the selected object's args from that map, converts
+    them to Stacksync field definitions, and appends a dynamic array field to the
+    schema before returning it.
 
     Args:
-        flask_request:   The raw Flask request object.
-        schema_path:     Path to the base JSON schema file on disk.
-        introspect_fn:   Callable(object_type, api_key) → dict with an "args" key
-                         containing Monday.com field metadata.
-        label_fn:        Callable(object_type) → str label for the dynamic field.
-        description_fn:  Callable(object_type) → str description for the dynamic field.
+        flask_request:  The raw Flask request object.
+        schema_path:    Path to the base JSON schema file on disk.
+        gql_root_type:  "Mutation" or "Query" — which root type to look up args from.
+        label_fn:       Callable(object_type) → str label for the dynamic field.
+        description_fn: Callable(object_type) → str description for the dynamic field.
 
     Returns:
         Response: A CDK Response containing {"schema": <schema dict>}, or an
@@ -46,29 +51,39 @@ def build_schema_response(flask_request, schema_path, introspect_fn, label_fn, d
         if not api_key or not object_type:
             return Response(data={"schema": base_schema})
 
-        # Introspect Monday.com to retrieve the field arguments for the selected object type
-        args = introspect_fn(object_type, api_key)["args"]
+        # One __schema call fetches every type in Monday.com's schema at once.
+        # All subsequent lookups (enum values, input fields, return type fields)
+        # read from this map — no further API calls during /schema.
+        type_map = get_schema_type_map(api_key)
 
-        # If introspection returns no args, fall back to the unmodified base schema
+        args_fn = (
+            get_query_args_from_map
+            if gql_root_type == "Query"
+            else get_mutation_args_from_map
+        )
+        args = args_fn(object_type, type_map)["args"]
+
         if not args:
             return Response(data={"schema": base_schema})
 
         # Convert Monday.com field args into CDK-compatible field definitions and their display order
-        fields, ui_order = build_schema_from_args(args, api_key)
+        fields, ui_order = build_schema_from_args(args, type_map)
 
         # Append the dynamically built array field to the base schema's field list
         base_schema["fields"].append(
             {
-                "id": object_type,           # Field ID matches the selected object type
-                "type": "array",             # Represented as a repeatable array of objects
+                "id": object_type,  # Field ID matches the selected object type
+                "type": "array",  # Represented as a repeatable array of objects
                 "label": label_fn(object_type),
                 "description": description_fn(object_type),
-                "default": [{}],             # Default to a single empty entry
+                "default": [{}],  # Default to a single empty entry
                 "items": {
                     "type": "object",
                     "default": {},
-                    "fields": fields,                          # Dynamically built sub-fields
-                    "ui_options": {"ui_order": ui_order},      # Control display order in the UI
+                    "fields": fields,  # Dynamically built sub-fields
+                    "ui_options": {
+                        "ui_order": ui_order
+                    },  # Control display order in the UI
                 },
             }
         )
@@ -81,4 +96,3 @@ def build_schema_response(flask_request, schema_path, introspect_fn, label_fn, d
     except Exception as e:
         # Catch-all for unexpected errors to avoid unhandled exceptions reaching the caller
         return Response.error(str(e))
-

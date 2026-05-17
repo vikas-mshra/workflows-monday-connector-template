@@ -8,7 +8,7 @@ from main import router
 from src.monday_client import get_mutation_args
 from src.monday_config import MONDAY_API_URL
 from src.monday_content import build_content_response
-from src.monday_schema import build_mutation_vars, build_schema_from_args, humanize
+from src.monday_schema import build_mutation_vars, humanize
 from src.utils.schema_loader import build_schema_response
 
 
@@ -133,7 +133,7 @@ def schema():
     return build_schema_response(
         flask_request,
         Path(__file__).parent / "schema.json",
-        get_mutation_args,
+        "Mutation",
         lambda ot: f"{humanize(ot)} ID",
         lambda ot: f"The ID of the {humanize(ot)} to delete",
     )

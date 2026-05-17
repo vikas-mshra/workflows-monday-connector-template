@@ -135,7 +135,7 @@ def schema():
     return build_schema_response(
         flask_request,
         Path(__file__).parent / "schema.json",
-        get_mutation_args,
+        "Mutation",
         lambda ot: f"{humanize(ot)} Records",
         lambda ot: f"List of {humanize(ot)} to create",
     )
