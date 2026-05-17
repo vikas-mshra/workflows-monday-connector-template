@@ -1,12 +1,10 @@
 from pathlib import Path
 
-import requests
 from flask import request as flask_request
 from workflows_cdk import ManagedError, Request, Response
 
 from main import router
-from src.monday_client import get_mutation_args
-from src.monday_config import MONDAY_API_URL
+from src.monday_client import get_mutation_args, run_monday_query
 from src.monday_content import build_content_response
 from src.monday_schema import build_mutation_vars, humanize
 from src.utils.schema_loader import build_schema_response
@@ -30,11 +28,6 @@ def execute():
 
         api_key = data.get("api_key")
         object_type = data.get("object_type")
-
-        headers = {
-            "Authorization": api_key,
-            "Content-Type": "application/json",
-        }
 
         # Records are keyed by object_type in the payload (e.g. "delete_board": [...])
         records = data.get(object_type)
@@ -79,16 +72,9 @@ def execute():
         var_clause = f"({', '.join(var_decls)})" if var_decls else ""
         mutation = f"mutation {var_clause} {{ {' '.join(alias_blocks)} }}"
 
-        response = requests.post(
-            MONDAY_API_URL,
-            json={"query": mutation, "variables": variables},
-            headers=headers,
+        api_result = run_monday_query(
+            query=mutation, token=api_key, variables=variables
         )
-        response.raise_for_status()
-        api_result = response.json()
-
-        if "errors" in api_result:
-            raise ManagedError(str(api_result["errors"]))
 
         # Map each aliased result back to its original record by index.
         # Scalar-returning mutations (e.g. update_board → JSON) give a raw value,
