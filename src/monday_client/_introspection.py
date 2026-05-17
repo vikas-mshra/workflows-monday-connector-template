@@ -1,4 +1,12 @@
+import time
+
 from ._http import run_monday_query
+
+# Keyed by token so different users don't share cached data.
+# Each entry is (type_map, fetched_at) — TTL prevents serving a stale schema
+# after Monday.com releases new mutations or deprecates existing ones.
+_type_map_cache: dict = {}
+_CACHE_TTL_SECONDS = 300
 
 # Both functions use the same introspection shape — 4 levels of ofType nesting
 # covers the deepest type wrapping Monday.com uses (e.g. NON_NULL(LIST(NON_NULL(SCALAR)))).
@@ -60,19 +68,28 @@ _SCHEMA_QUERY = """
 
 def get_schema_type_map(token: str) -> dict:
     """
-    Fetches the full Monday.com GraphQL schema in one API call and returns a
-    {type_name: type_definition} map.
+    Returns a {type_name: type_definition} map for the full Monday.com schema.
 
-    Used at the start of /schema to eliminate the per-enum and per-input-object
-    __type calls that _enum_field, _object_field, and build_selection previously
-    made individually.
+    Results are cached per token for _CACHE_TTL_SECONDS (default 5 min) so
+    repeated calls within a request session — e.g. /schema followed by /execute
+    in duplicate or add_data — cost zero extra API calls. Each worker process
+    maintains its own cache; the TTL ensures schema changes are picked up without
+    a server restart.
     """
+    cached = _type_map_cache.get(token)
+    if cached:
+        type_map, fetched_at = cached
+        if time.time() - fetched_at < _CACHE_TTL_SECONDS:
+            return type_map
+
     result = run_monday_query(query=_SCHEMA_QUERY, token=token)
-    return {
+    type_map = {
         t["name"]: t
         for t in result["data"]["__schema"]["types"]
         if t["name"]
     }
+    _type_map_cache[token] = (type_map, time.time())
+    return type_map
 
 
 def get_mutation_args_from_map(object_type: str, type_map: dict) -> dict:
