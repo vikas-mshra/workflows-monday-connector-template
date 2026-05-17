@@ -1,6 +1,8 @@
 import json
 import re
 
+from workflows_cdk import ManagedError
+
 from ._schema_fields import _extract_inner_type
 
 
@@ -92,7 +94,14 @@ def build_request_variables(args: list, record: dict, index: int) -> tuple:
                     value = json.dumps(value)
                 elif isinstance(value, str):
                     cleaned = re.sub(r",\s*([}\]])", r"\1", value)
-                    json.loads(cleaned)  # validate only; raise on malformed JSON
+                    try:
+                        json.loads(cleaned)
+                    except json.JSONDecodeError as e:
+                        # e.msg + e.pos only — never include e.doc / the raw value,
+                        # which may contain PII the user typed into column_values.
+                        raise ManagedError(
+                            f"Invalid JSON in field '{name}': {e.msg} at position {e.pos}"
+                        )
                     value = cleaned
             var_decls.append(f"${var_name}: {gql_type}")
             variables[var_name] = value
