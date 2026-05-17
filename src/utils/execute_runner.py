@@ -4,6 +4,7 @@ from workflows_cdk import ManagedError, Request, Response
 
 from src.monday_client import run_monday_query
 from src.monday_schema import build_request_variables
+from src.utils.gql_validation import validate_object_type
 
 
 def execute_batched_operation(
@@ -52,6 +53,8 @@ def execute_batched_operation(
 
         api_key = data["api_key"]
         object_type = data["object_type"]
+
+        validate_object_type(object_type)
 
         # Records are keyed by object_type in the payload (e.g. "create_board": [...]).
         records = data.get(object_type)

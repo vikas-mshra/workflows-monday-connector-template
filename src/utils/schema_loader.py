@@ -8,6 +8,7 @@ from src.monday_client import (
     get_schema_type_map,
 )
 from src.monday_schema import build_schema_from_args
+from src.utils.gql_validation import validate_object_type
 
 
 def build_schema_response(
@@ -50,6 +51,8 @@ def build_schema_response(
         # If either required value is missing, return the base schema as-is (no dynamic fields)
         if not api_key or not object_type:
             return Response(data={"schema": base_schema})
+
+        validate_object_type(object_type)
 
         # One __schema call fetches every type in Monday.com's schema at once.
         # All subsequent lookups (enum values, input fields, return type fields)
