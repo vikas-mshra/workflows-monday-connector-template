@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 import requests
@@ -10,6 +9,7 @@ from src.monday_client import get_mutation_args
 from src.monday_config import MONDAY_API_URL
 from src.monday_content import build_content_response
 from src.monday_schema import build_mutation_vars, build_schema_from_args, humanize
+from src.utils.schema_loader import build_schema_response
 
 
 @router.route("/execute", methods=["GET", "POST"])
@@ -130,50 +130,10 @@ def content():
 
 @router.route("/schema", methods=["GET", "POST"])
 def schema():
-    try:
-        schema_path = Path(__file__).parent / "schema.json"
-        with open(schema_path, "r") as f:
-            base_schema = json.load(f)
-
-        request = Request(flask_request)
-        data = request.data
-
-        form_data = data.get("form_data", {})
-        object_type = form_data.get("object_type")
-        api_key = form_data.get("api_key")
-
-        # Returned immediately if the user hasn't filled in the api_key or
-        # hasn't selected an object_type yet.
-        if not api_key or not object_type:
-            return Response(data={"schema": base_schema})
-
-        # Use GraphQL introspection to discover the args for the selected mutation.
-        # build_schema_from_args converts each arg into a form field definition,
-        # fetching enum values from the API where needed.
-        args = get_mutation_args(object_type, api_key)["args"]
-        if not args:
-            return Response(data={"schema": base_schema})
-        fields, ui_order = build_schema_from_args(args, api_key)
-
-        # Wrap the generated fields in an array field so the user can create
-        # multiple records in one workflow execution.
-        base_schema["fields"].append(
-            {
-                "id": object_type,
-                "type": "array",
-                "label": f"{humanize(object_type)} ID",
-                "description": f"The ID of the {humanize(object_type)} to delete",
-                "default": [{}],
-                "items": {
-                    "type": "object",
-                    "default": {},
-                    "fields": fields,
-                    "ui_options": {"ui_order": ui_order},
-                },
-            }
-        )
-        return Response(data={"schema": base_schema})
-    except ManagedError as e:
-        return Response.error(str(e))
-    except Exception as e:
-        return Response.error(str(e))
+    return build_schema_response(
+        flask_request,
+        Path(__file__).parent / "schema.json",
+        get_mutation_args,
+        lambda ot: f"{humanize(ot)} ID",
+        lambda ot: f"The ID of the {humanize(ot)} to delete",
+    )
