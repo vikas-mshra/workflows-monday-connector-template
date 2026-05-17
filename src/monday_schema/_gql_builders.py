@@ -24,13 +24,13 @@ def _is_empty_input(value) -> bool:
     return False
 
 
-def _build_operation_variables(args: list, record: dict, index: int) -> tuple:
+def resolve_record_to_gql_args(args: list, record: dict, index: int) -> tuple:
     """
-    Shared core for build_mutation_vars and build_query_vars.
+    Builds GQL variable declarations, arg strings, variables dict, and a list
+    of any missing required field names for one record in a batched operation.
 
-    Walks the introspection args for one record and returns
-    (var_decls, arg_strings, variables, missing_required) ready to splice
-    into a batched GQL operation. Collecting missing-required names in the
+    Works for both mutations and queries — callers use the same function
+    regardless of operation type. Collecting missing-required names in the
     same pass is free (we're already iterating) and gives the user a clear
     `"<field> is required"` error instead of Monday.com's GraphQL error.
     """
@@ -95,16 +95,6 @@ def _build_operation_variables(args: list, record: dict, index: int) -> tuple:
     return var_decls, arg_strings, variables, missing_required
 
 
-def build_mutation_vars(args: list, record: dict, index: int) -> tuple:
-    """Variable builder for mutation operations (create, update, delete, duplicate)."""
-    return _build_operation_variables(args, record, index)
-
-
-def build_query_vars(args: list, record: dict, index: int) -> tuple:
-    """Variable builder for query operations (get/list)."""
-    return _build_operation_variables(args, record, index)
-
-
 def build_selection(return_type: dict, type_map: dict) -> str:
     """
     Builds the GraphQL selection set string for a mutation's return type.
@@ -123,7 +113,9 @@ def build_selection(return_type: dict, type_map: dict) -> str:
     # Peel off NON_NULL wrapper to get to the actual type underneath.
     unwrapped_return_type = return_type
     if unwrapped_return_type.get("kind") == "NON_NULL":
-        unwrapped_return_type = unwrapped_return_type.get("ofType") or unwrapped_return_type
+        unwrapped_return_type = (
+            unwrapped_return_type.get("ofType") or unwrapped_return_type
+        )
 
     kind = unwrapped_return_type.get("kind")
 

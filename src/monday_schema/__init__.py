@@ -1,10 +1,9 @@
-from ._schema_fields import humanize, build_schema_from_args
-from ._gql_builders import build_mutation_vars, build_query_vars, build_selection
+from ._gql_builders import build_selection, resolve_record_to_gql_args
+from ._schema_fields import build_schema_from_args, humanize
 
 __all__ = [
     "humanize",
     "build_schema_from_args",
-    "build_mutation_vars",
-    "build_query_vars",
+    "resolve_record_to_gql_args",
     "build_selection",
 ]

@@ -6,7 +6,7 @@ from workflows_cdk import ManagedError, Request, Response
 from main import router
 from src.monday_client import get_mutation_args, run_monday_query
 from src.monday_content import build_content_response
-from src.monday_schema import build_mutation_vars, humanize
+from src.monday_schema import humanize, resolve_record_to_gql_args
 from src.utils.schema_loader import build_schema_response
 
 
@@ -57,7 +57,7 @@ def execute():
 
         for record_index, record in enumerate(records):
             record_var_decls, arg_strings, record_variables, missing = (
-                build_mutation_vars(args, record, record_index)
+                resolve_record_to_gql_args(args, record, record_index)
             )
             if missing:
                 raise ManagedError(f"{missing[0]} is required")
