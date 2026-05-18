@@ -120,21 +120,20 @@ def _build_array_field(
     """Builds a repeatable list field for a GraphQL LIST arg.
 
     Pass item_fields + item_ui_order to get typed items (e.g. for LIST(INPUT_OBJECT)).
-    When omitted, falls back to a single generic string item derived by stripping
-    a trailing 's' from the field name — a heuristic for untyped scalar lists.
+    When omitted, falls back to a single generic string item whose id matches the
+    arg name — the request-side LIST(SCALAR/ENUM) reader looks it up by the same key.
     """
     if item_fields is None:
-        item_name = name.removesuffix("s")
         item_field = {
-            "id": item_name,
+            "id": name,
             "type": "string",
-            "label": humanize(item_name),
+            "label": humanize(name),
             "default": "",
         }
         if description:
-            item_field["description"] = description.removesuffix("s")
+            item_field["description"] = description
         item_fields = [item_field]
-        item_ui_order = [item_name]
+        item_ui_order = [name]
 
     field = {
         "id": name,
@@ -233,10 +232,9 @@ def _build_object_field(
                     item_ui_order=nested["ui_options"]["ui_order"],
                 )
             elif element_kind == "ENUM" and element_type_name:
-                item_name = field_name.removesuffix("s") or field_name
                 item_field = _build_enum_field(
-                    item_name,
-                    humanize(item_name),
+                    field_name,
+                    humanize(field_name),
                     field_description,
                     element_type_name,
                     False,
@@ -248,7 +246,7 @@ def _build_object_field(
                     field_description,
                     field_required,
                     item_fields=[item_field],
-                    item_ui_order=[item_name],
+                    item_ui_order=[field_name],
                 )
             else:
                 sub_field = _build_array_field(
@@ -332,10 +330,9 @@ def build_schema_from_args(args: list, type_map: dict) -> tuple:
                     item_ui_order=nested["ui_options"]["ui_order"],
                 )
             elif element_kind == "ENUM" and element_type_name:
-                item_name = name.removesuffix("s") or name
                 item_field = _build_enum_field(
-                    item_name,
-                    humanize(item_name),
+                    name,
+                    humanize(name),
                     description,
                     element_type_name,
                     False,
@@ -347,7 +344,7 @@ def build_schema_from_args(args: list, type_map: dict) -> tuple:
                     description,
                     required,
                     item_fields=[item_field],
-                    item_ui_order=[item_name],
+                    item_ui_order=[name],
                 )
             else:
                 field = _build_array_field(name, label, description, required)

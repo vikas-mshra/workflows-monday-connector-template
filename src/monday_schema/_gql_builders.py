@@ -3,7 +3,7 @@ import re
 
 from workflows_cdk import ManagedError
 
-from ._schema_fields import _extract_inner_type
+from ._schema_fields import _extract_inner_type, _unwrap_non_null_fully
 
 
 def _gql_type_string(type_info: dict) -> str:
@@ -50,18 +50,47 @@ def build_request_variables(args: list, record: dict, index: int) -> tuple:
         gql_type = _gql_type_string(arg["type"])
 
         if actual_kind == "LIST":
-            item_key = name.removesuffix("s")
-            ids = [
-                str(item[item_key])
-                for item in (record.get(name) or [])
-                if item.get(item_key)
-            ]
-            if not ids:
+            # Peel NON_NULL → LIST → inner NON_NULL to find the element kind. The
+            # schema builder renders each LIST shape differently, so we have to
+            # mirror that here to pull the values back out the right way.
+            list_type, _ = _unwrap_non_null_fully(arg["type"])
+            element_type, _ = _unwrap_non_null_fully(list_type.get("ofType") or {})
+            element_kind = element_type.get("kind")
+            element_name = element_type.get("name")
+
+            raw_items = record.get(name) or []
+
+            if element_kind == "INPUT_OBJECT":
+                # _build_object_field renders LIST(INPUT_OBJECT) items with the
+                # INPUT_OBJECT's real sub-field names, so each form item is already
+                # shaped like the GraphQL input — pass dicts through. Empty items
+                # are dropped for the same reason as the top-level INPUT_OBJECT
+                # branch (Monday rejects {} as VALIDATION_INVALID_TYPE_VARIABLE).
+                items = [
+                    item for item in raw_items
+                    if isinstance(item, dict) and not _is_empty_input(item)
+                ]
+            else:
+                # LIST(SCALAR) and LIST(ENUM) items are single-key dicts whose key
+                # is the arg name itself — see _build_array_field's default item
+                # builder and the LIST(ENUM) branch in build_schema_from_args.
+                # The two sides are coupled: change them together.
+                items = [
+                    item[name] for item in raw_items
+                    if isinstance(item, dict) and not _is_empty_input(item.get(name))
+                ]
+                # Monday IDs routinely exceed 2^53; coerce numeric inputs so they
+                # don't lose precision on the JSON round-trip. Only for ID — Int
+                # and Float must stay numeric to pass Monday's type validation.
+                if element_kind == "SCALAR" and element_name == "ID":
+                    items = [str(v) for v in items]
+
+            if not items:
                 if required:
                     missing_required.append(name)
                 continue
             var_decls.append(f"${var_name}: {gql_type}")
-            variables[var_name] = ids
+            variables[var_name] = items
             arg_strings.append(f"{name}: ${var_name}")
         else:
             value = record.get(name)
@@ -132,20 +161,12 @@ def build_response_selection(return_type: dict, type_map: dict) -> str:
         rationale (no common human-readable field across Monday.com types).
         Callers needing more than the id for a sub-object should do a follow-up
         query using that id.
-      * Wrapper-unwrap logic here is inlined for now. For consistency with
-        build_schema_from_args (which uses `_extract_inner_type` and
-        `_unwrap_non_null_fully` from _schema_fields.py), this function could be
-        refactored to share those helpers — purely cosmetic, no behavior change.
       * Sub-fields whose introspection declares required arguments (e.g.
         Board.items_page(limit: Int!)) are filtered out — selecting them bare
         would emit invalid GraphQL.
     """
     # Peel off NON_NULL wrapper to get to the actual type underneath.
-    unwrapped_return_type = return_type
-    if unwrapped_return_type.get("kind") == "NON_NULL":
-        unwrapped_return_type = (
-            unwrapped_return_type.get("ofType") or unwrapped_return_type
-        )
+    unwrapped_return_type, _ = _unwrap_non_null_fully(return_type)
 
     kind = unwrapped_return_type.get("kind")
 
@@ -155,9 +176,7 @@ def build_response_selection(return_type: dict, type_map: dict) -> str:
 
     # For list return types, unwrap to the element type.
     if kind == "LIST":
-        inner = unwrapped_return_type.get("ofType") or {}
-        if inner.get("kind") == "NON_NULL":
-            inner = inner.get("ofType") or inner
+        inner, _ = _unwrap_non_null_fully(unwrapped_return_type.get("ofType") or {})
         if inner.get("kind") in ("SCALAR", "ENUM"):
             return ""
         unwrapped_return_type = inner
@@ -176,9 +195,7 @@ def build_response_selection(return_type: dict, type_map: dict) -> str:
         if any((arg.get("type") or {}).get("kind") == "NON_NULL" for arg in field_args):
             continue
 
-        field_type = field_definition["type"]
-        if field_type.get("kind") == "NON_NULL":
-            field_type = field_type.get("ofType") or field_type
+        field_type, _ = _unwrap_non_null_fully(field_definition["type"])
         field_kind = field_type.get("kind")
 
         if field_kind in ("SCALAR", "ENUM"):
@@ -196,9 +213,7 @@ def build_response_selection(return_type: dict, type_map: dict) -> str:
             parts.append(f"{field_definition['name']} {{ id }}")
         elif field_kind == "LIST":
             # Peel LIST and an optional inner NON_NULL to find the element kind.
-            element_type = field_type.get("ofType") or {}
-            if element_type.get("kind") == "NON_NULL":
-                element_type = element_type.get("ofType") or element_type
+            element_type, _ = _unwrap_non_null_fully(field_type.get("ofType") or {})
             element_kind = element_type.get("kind")
             if element_kind in ("SCALAR", "ENUM"):
                 parts.append(field_definition["name"])
