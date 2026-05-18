@@ -1,22 +1,4 @@
-import hashlib
-
-from cachetools import TTLCache
-
 from ._http import run_monday_query
-
-# Bounded TTL cache so multi-tenant load can't grow the cache without limit
-# and so stale entries get evicted on access (not just overwritten on refresh).
-# Keys are SHA-256 hashes of the token — never the raw token — so a heap dump,
-# repr() in a debugger, or Sentry breadcrumb that snapshots locals can't expose
-# active credentials. TTL prevents serving a stale schema after Monday.com
-# releases new mutations or deprecates existing ones.
-_CACHE_MAX_SIZE = 1000
-_CACHE_TTL_SECONDS = 300
-_type_map_cache: TTLCache = TTLCache(maxsize=_CACHE_MAX_SIZE, ttl=_CACHE_TTL_SECONDS)
-
-
-def _token_cache_key(token: str) -> str:
-    return hashlib.sha256(token.encode()).hexdigest()[:32]
 
 # Both functions use the same introspection shape — 4 levels of ofType nesting
 # covers the deepest type wrapping Monday.com uses (e.g. NON_NULL(LIST(NON_NULL(SCALAR)))).
@@ -77,25 +59,19 @@ _SCHEMA_QUERY = """
 
 
 def get_schema_type_map(token: str) -> dict:
-    """
-    Returns a {type_name: type_definition} map for the full Monday.com schema.
+    """Returns a {type_name: type_definition} map for the full Monday.com schema.
 
-    Results are cached per token (keyed by hash, see _token_cache_key) for
-    _CACHE_TTL_SECONDS (default 5 min) so repeated calls within a request
-    session — e.g. /schema followed by /execute in duplicate or add_data —
-    cost zero extra API calls. The TTLCache bounds memory under multi-tenant
-    load and evicts stale entries on access; the TTL also ensures schema
-    changes are picked up without a server restart.
-    """
-    cache_key = _token_cache_key(token)
-    cached = _type_map_cache.get(cache_key)
-    if cached is not None:
-        return cached
+    One __schema round-trip per call. Callers pass the resulting dict through
+    every downstream helper (get_*_args_from_map, build_schema_from_args,
+    build_response_selection), so a single request makes exactly one
+    introspection call regardless of how many types it touches.
 
+    No in-process cache: containers are stateless and load-balanced, so a
+    per-process cache hits cold for most requests. If introspection latency
+    becomes load-visible, add a shared store (e.g. Redis) — see PR discussion.
+    """
     result = run_monday_query(query=_SCHEMA_QUERY, token=token)
-    type_map = {t["name"]: t for t in result["data"]["__schema"]["types"] if t["name"]}
-    _type_map_cache[cache_key] = type_map
-    return type_map
+    return {t["name"]: t for t in result["data"]["__schema"]["types"] if t["name"]}
 
 
 def get_mutation_args_from_map(object_type: str, type_map: dict) -> dict:
