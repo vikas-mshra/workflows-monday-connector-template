@@ -1,167 +1,89 @@
 from ._http import run_monday_query
 
-# Both functions use the same introspection shape — 4 levels of ofType nesting
-# covers the deepest type wrapping Monday.com uses (e.g. NON_NULL(LIST(NON_NULL(SCALAR)))).
-_ARG_TYPE_FRAGMENT = """
-    name
-    kind
-    ofType {
-        name
-        kind
-        ofType {
-            name
-            kind
-            ofType {
-                name
-                kind
-            }
-        }
-    }
-"""
 
-# __schema query fetches every type in the Monday.com schema in one round-trip.
-# Used by get_schema_type_map to build a {name: type_def} dict so /schema can
-# resolve all enum values, input fields, and return type fields without further
-# API calls. TypeRef fragment nests ofType 4 levels deep — enough for Monday's
-# deepest real wrapping: NON_NULL(LIST(NON_NULL(INPUT_OBJECT))).
-_SCHEMA_QUERY = """
-    query {
-        __schema {
-            types {
-                name
-                kind
-                enumValues(includeDeprecated: true) { name }
-                inputFields {
-                    name description defaultValue
-                    type {
-                        ...TypeRef
-                    }
-                }
-                fields(includeDeprecated: true) {
-                    name description
-                    type { ...TypeRef }
-                    args {
+def get_type_definitions(token: str) -> dict:
+    """
+    Returns a {type_name: type_definition} map for the full Monday.com schema.
+    """
+    query = """
+        query {
+            __schema {
+                types {
+                    name
+                    kind
+                    enumValues(includeDeprecated: true) { name }
+                    inputFields {
                         name description defaultValue
+                        type {
+                            ...TypeRef
+                        }
+                    }
+                    fields(includeDeprecated: true) {
+                        name description
                         type { ...TypeRef }
+                        args {
+                            name description defaultValue
+                            type { ...TypeRef }
+                        }
                     }
                 }
             }
         }
-    }
-    fragment TypeRef on __Type {
-        kind name
-        ofType { kind name
+        fragment TypeRef on __Type {
+            kind name
             ofType { kind name
                 ofType { kind name
-                    ofType { kind name } } } }
-    }
-"""
-
-
-def get_schema_type_map(token: str) -> dict:
-    """Returns a {type_name: type_definition} map for the full Monday.com schema.
-
-    One __schema round-trip per call. Callers pass the resulting dict through
-    every downstream helper (get_*_args_from_map, build_schema_from_args,
-    build_response_selection), so a single request makes exactly one
-    introspection call regardless of how many types it touches.
-
-    No in-process cache: containers are stateless and load-balanced, so a
-    per-process cache hits cold for most requests. If introspection latency
-    becomes load-visible, add a shared store (e.g. Redis) — see PR discussion.
+                    ofType { kind name
+                        ofType { kind name } } } }
+        }
     """
-    result = run_monday_query(query=_SCHEMA_QUERY, token=token)
+    result = run_monday_query(query=query, token=token)
     return {t["name"]: t for t in result["data"]["__schema"]["types"] if t["name"]}
 
 
-def get_mutation_args_from_map(object_type: str, type_map: dict) -> dict:
+def get_args_and_return_type(root_type: str, object_type: str, type_map: dict) -> dict:
     """
-    Returns args and return_type for a named mutation by looking up the
-    pre-fetched type_map instead of calling the API.
-
-    Same return shape as get_mutation_args.
+    Returns args and return_type for a named mutation/query by looking up the
+    pre-fetched type_map
     """
-    for field in (type_map.get("Mutation") or {}).get("fields") or []:
+    for field in (type_map.get(root_type) or {}).get("fields") or []:
         if field["name"] == object_type:
             return {"args": field["args"], "return_type": field["type"]}
     return {"args": [], "return_type": {"kind": "SCALAR", "name": None}}
 
 
-def get_query_args_from_map(object_type: str, type_map: dict) -> dict:
+def get_mutation_field_definitions(token: str) -> dict:
     """
-    Returns args and return_type for a named query field by looking up the
-    pre-fetched type_map instead of calling the API.
-
-    Same return shape as get_query_args.
-    """
-    for field in (type_map.get("Query") or {}).get("fields") or []:
-        if field["name"] == object_type:
-            return {"args": field["args"], "return_type": field["type"]}
-    return {"args": [], "return_type": {"kind": "SCALAR", "name": None}}
-
-
-def get_mutation_args(object_type: str, token: str) -> dict:
-    """
-    Returns args and return_type for a named mutation by introspecting
-    Monday.com's Mutation type.
-
+    Returns a {"Mutation": type_definition} map for the mutation fields of Monday.com schema.
     Return value:
       {
-        "args":        list of GraphQL arg definitions (name, description, type),
-        "return_type": raw introspection type node for what the mutation returns
+        "Mutation": type_definition (fields)
       }
 
-    - args       → used by build_request_variables to validate inputs and build GQL variables
-    - return_type → used by build_response_selection to decide whether a selection set is needed
+    - args → used by create/update/delete to build GQL variables
     """
-    query = f"""
-        query {{
-            __type(name: "Mutation") {{
-                fields {{
+    query = """
+        query {
+            __type(name: "Mutation") {
+                fields {
                     name
-                    type {{ {_ARG_TYPE_FRAGMENT} }}
-                    args {{
+                    type { ...ArgTypeRef }
+                    args {
                         name
                         description
                         defaultValue
-                        type {{ {_ARG_TYPE_FRAGMENT} }}
-                    }}
-                }}
-            }}
-        }}
+                        type { ...ArgTypeRef }
+                    }
+                }
+            }
+        }
+        fragment ArgTypeRef on __Type {
+            name kind
+            ofType { name kind
+                ofType { name kind
+                    ofType { kind name
+                        ofType { name kind } } } }
+        }
     """
     result = run_monday_query(query=query, token=token)
-    for field in result["data"]["__type"]["fields"]:
-        if field["name"] == object_type:
-            return {"args": field["args"], "return_type": field["type"]}
-    return {"args": [], "return_type": {"kind": "SCALAR", "name": None}}
-
-
-def get_query_args(object_type: str, token: str) -> dict:
-    """
-    Returns args and return_type for a named query field by introspecting
-    Monday.com's Query type.
-
-    Same shape as get_mutation_args — only the root type differs (Query vs Mutation).
-    """
-    query = f"""
-        query {{
-            __type(name: "Query") {{
-                fields {{
-                    name
-                    type {{ {_ARG_TYPE_FRAGMENT} }}
-                    args {{
-                        name
-                        description
-                        defaultValue
-                        type {{ {_ARG_TYPE_FRAGMENT} }}
-                    }}
-                }}
-            }}
-        }}
-    """
-    result = run_monday_query(query=query, token=token)
-    for field in result["data"]["__type"]["fields"]:
-        if field["name"] == object_type:
-            return {"args": field["args"], "return_type": field["type"]}
-    return {"args": [], "return_type": {"kind": "SCALAR", "name": None}}
+    return {"Mutation": result["data"]["__type"]}

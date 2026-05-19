@@ -3,9 +3,8 @@ import json
 from workflows_cdk import ManagedError, Request, Response
 
 from src.monday_client import (
-    get_mutation_args_from_map,
-    get_query_args_from_map,
-    get_schema_type_map,
+    get_args_and_return_type,
+    get_type_definitions,
 )
 from src.monday_schema import build_schema_from_args
 from src.utils.gql_validation import validate_object_type
@@ -57,14 +56,9 @@ def build_schema_response(
         # One __schema call fetches every type in Monday.com's schema at once.
         # All subsequent lookups (enum values, input fields, return type fields)
         # read from this map — no further API calls during /schema.
-        type_map = get_schema_type_map(api_key)
+        type_map = get_type_definitions(api_key)
 
-        args_fn = (
-            get_query_args_from_map
-            if gql_root_type == "Query"
-            else get_mutation_args_from_map
-        )
-        args = args_fn(object_type, type_map)["args"]
+        args = get_args_and_return_type(gql_root_type, object_type, type_map)["args"]
 
         if not args:
             return Response(data={"schema": base_schema})

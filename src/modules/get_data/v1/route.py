@@ -3,7 +3,7 @@ from pathlib import Path
 from flask import request as flask_request
 
 from main import router
-from src.monday_client import get_query_args_from_map, get_schema_type_map
+from src.monday_client import get_args_and_return_type, get_type_definitions
 from src.monday_content import build_content_response
 from src.monday_schema import build_response_selection, humanize
 from src.utils.execute_runner import execute_batched_operation
@@ -11,8 +11,8 @@ from src.utils.schema_loader import build_schema_response
 
 
 def _resolve_get_operation(object_type: str, api_key: str) -> tuple:
-    type_map = get_schema_type_map(api_key)
-    query_info = get_query_args_from_map(object_type, type_map)
+    type_map = get_type_definitions(api_key)
+    query_info = get_args_and_return_type("Query", object_type, type_map)
     return query_info["args"], build_response_selection(
         query_info["return_type"], type_map
     )
