@@ -283,7 +283,7 @@ def _build_object_field(
     return field
 
 
-def build_schema_from_args(args: list, type_map: dict) -> tuple:
+def build_schema_from_object_args(args: list, type_map: dict) -> tuple:
     """
     Converts a list of GraphQL arg definitions (from introspection) into
     Stacksync form field definitions and a ui_order list.

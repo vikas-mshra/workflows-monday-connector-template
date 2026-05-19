@@ -26,7 +26,7 @@ def _is_empty_input(value) -> bool:
     return False
 
 
-def build_request_variables(args: list, record: dict, index: int) -> tuple:
+def build_payload_for_monday(args: list, record: dict, index: int) -> tuple:
     """
     Builds the GraphQL **request** side for one record in a batched operation:
     variable declarations, inline arg strings, the variables dict to send, and
@@ -67,7 +67,8 @@ def build_request_variables(args: list, record: dict, index: int) -> tuple:
                 # are dropped for the same reason as the top-level INPUT_OBJECT
                 # branch (Monday rejects {} as VALIDATION_INVALID_TYPE_VARIABLE).
                 items = [
-                    item for item in raw_items
+                    item
+                    for item in raw_items
                     if isinstance(item, dict) and not _is_empty_input(item)
                 ]
             else:
@@ -76,7 +77,8 @@ def build_request_variables(args: list, record: dict, index: int) -> tuple:
                 # builder and the LIST(ENUM) branch in build_schema_from_args.
                 # The two sides are coupled: change them together.
                 items = [
-                    item[name] for item in raw_items
+                    item[name]
+                    for item in raw_items
                     if isinstance(item, dict) and not _is_empty_input(item.get(name))
                 ]
                 # Monday IDs routinely exceed 2^53; coerce numeric inputs so they
@@ -139,7 +141,7 @@ def build_request_variables(args: list, record: dict, index: int) -> tuple:
     return var_decls, arg_strings, variables, missing_required
 
 
-def build_response_selection(return_type: dict, type_map: dict) -> str:
+def parameter_to_fetch_from_monday(return_type: dict, type_map: dict) -> str:
     """
     Builds the GraphQL **response** selection set for a mutation/query return type.
 

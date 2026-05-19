@@ -3,7 +3,7 @@ from typing import Callable, Optional
 from workflows_cdk import ManagedError, Request, Response
 
 from src.monday_client import run_monday_query
-from src.monday_schema import build_request_variables
+from src.monday_schema import build_payload_for_monday
 from src.utils.gql_validation import validate_object_type
 
 
@@ -22,7 +22,7 @@ def execute_batched_operation(
     GraphQL operation that runs all records via aliases in one HTTP round-trip,
     then map results back to each record by index. The only per-module
     differences are how args/selection are computed (introspection vs cached
-    type_map; legacy `{ id }` vs build_response_selection), whether the
+    type_map; legacy `{ id }` vs parameter_to_fetch_from_monday), whether the
     operation is a mutation or a query, and how list-shaped results are keyed.
     This function captures everything else.
 
@@ -65,7 +65,7 @@ def execute_batched_operation(
         if not args:
             raise ManagedError(f"Unsupported object type: {object_type}")
 
-        # Build request variables + alias blocks per record. build_request_variables
+        # Build request variables + alias blocks per record. build_payload_for_monday
         # also collects missing required fields in the same pass — we raise a clear
         # ManagedError instead of letting the request reach Monday.com.
         var_decls = []
@@ -74,7 +74,7 @@ def execute_batched_operation(
 
         for record_index, record in enumerate(records):
             record_var_decls, arg_strings, record_variables, missing = (
-                build_request_variables(args, record, record_index)
+                build_payload_for_monday(args, record, record_index)
             )
             if missing:
                 raise ManagedError(f"{missing[0]} is required")

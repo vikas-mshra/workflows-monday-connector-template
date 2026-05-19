@@ -6,7 +6,7 @@ from src.monday_client import (
     get_args_and_return_type,
     get_type_definitions,
 )
-from src.monday_schema import build_schema_from_args
+from src.monday_schema import build_schema_from_object_args
 from src.utils.gql_validation import validate_object_type
 
 
@@ -64,7 +64,7 @@ def build_schema_response(
             return Response(data={"schema": base_schema})
 
         # Convert Monday.com field args into CDK-compatible field definitions and their display order
-        fields, ui_order = build_schema_from_args(args, type_map)
+        fields, ui_order = build_schema_from_object_args(args, type_map)
 
         # Append the dynamically built array field to the base schema's field list
         base_schema["fields"].append(

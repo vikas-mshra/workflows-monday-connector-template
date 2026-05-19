@@ -1,4 +1,4 @@
-from ._http import run_monday_query
+from .query_executor import run_monday_query
 
 
 def get_type_definitions(token: str) -> dict:
