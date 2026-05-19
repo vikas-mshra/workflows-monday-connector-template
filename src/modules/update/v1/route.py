@@ -11,8 +11,8 @@ from src.utils.schema_loader import build_schema_response
 
 
 def _resolve_update_operation(object_type: str, api_key: str) -> tuple:
-    type_map = get_mutation_field_definitions(api_key)
-    query_info = get_args_and_return_type("Mutation", object_type, type_map)
+    field_map = get_mutation_field_definitions(api_key)
+    query_info = get_args_and_return_type("Mutation", object_type, field_map)
     return_type = query_info["return_type"]
     base_return_kind = (return_type.get("ofType") or return_type).get("kind")
     selection = "" if base_return_kind in ("SCALAR", "ENUM") else "{ id }"
