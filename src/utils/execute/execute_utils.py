@@ -3,8 +3,8 @@ from typing import Callable, Optional
 from workflows_cdk import ManagedError, Request, Response
 
 from src.monday_client import run_monday_query
-from src.monday_schema import build_payload_for_monday
-from src.utils.gql_validation import validate_object_type
+from src.utils.execute.execute_helper import build_payload_for_monday
+from src.utils.utils import validate_object_type
 
 
 def execute_batched_operation(

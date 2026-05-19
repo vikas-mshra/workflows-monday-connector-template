@@ -2,7 +2,7 @@ from src.monday_client import run_monday_query
 from workflows_cdk import ManagedError, Request, Response
 
 
-def build_content_response(flask_request, filter_object_types, gql_root_type="Mutation"):
+def build_content_data(flask_request, filter_object_types, gql_root_type="Mutation"):
     """
     Shared /content handler. Introspects the given GraphQL root type, then delegates
     field filtering and label-building to the module-supplied filter_object_types callable.

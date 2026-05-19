@@ -1,5 +1,7 @@
 import json
 
+from src.utils.utils import extract_inner_type, humanize, unwrap_non_null_fully
+
 # Maps Monday.com GraphQL scalar type names to Stacksync field type strings.
 SCALAR_TYPE_MAP = {
     "String": "string",
@@ -19,40 +21,6 @@ SCALAR_UI_OPTIONS_MAP = {
         "ui_options": {"language": "json"},
     },
 }
-
-
-def humanize(name: str) -> str:
-    """Converts a snake_case identifier to a Title Case human label."""
-    return name.replace("_", " ").title()
-
-
-def _extract_inner_type(type_info: dict) -> tuple:
-    """
-    Unwraps one level of NON_NULL and returns (kind, name, required).
-
-    GraphQL marks required args as NON_NULL(actualType). We peel that wrapper
-    so callers can work with the real kind/name while still knowing it's required.
-    """
-    if type_info["kind"] == "NON_NULL":
-        of_type = type_info.get("ofType") or {}
-        return of_type.get("kind"), of_type.get("name"), True
-    return type_info["kind"], type_info.get("name"), False
-
-
-def _unwrap_non_null_fully(type_info: dict) -> tuple:
-    """
-    Fully unwraps all NON_NULL wrappers, returning (inner_type_dict, required).
-
-    Unlike _extract_inner_type (which peels exactly one layer and returns only kind/name),
-    this returns the actual type dict so callers can continue walking ofType — necessary
-    for stacked wrappers like NON_NULL(LIST(NON_NULL(INPUT_OBJECT))).
-    """
-    required = False
-    current_type = type_info
-    while current_type and current_type.get("kind") == "NON_NULL":
-        required = True
-        current_type = current_type.get("ofType") or {}
-    return current_type, required
 
 
 def _build_enum_field(
@@ -179,7 +147,7 @@ def _build_object_field(
         field_label = humanize(field_name)
         field_description = input_field.get("description") or ""
         field_default_value = input_field.get("defaultValue")
-        field_type_info, field_required = _unwrap_non_null_fully(input_field["type"])
+        field_type_info, field_required = unwrap_non_null_fully(input_field["type"])
         # If the parent object is optional, its sub-fields are only required when
         # the parent is actually provided — not enforced in the UI.
         if not required:
@@ -207,9 +175,7 @@ def _build_object_field(
                 field_default_value,
             )
         elif field_kind == "LIST":
-            element_type, _ = _unwrap_non_null_fully(
-                field_type_info.get("ofType") or {}
-            )
+            element_type, _ = unwrap_non_null_fully(field_type_info.get("ofType") or {})
             element_kind = element_type.get("kind")
             element_type_name = element_type.get("name")
             # Guard against self-referential lists (e.g. ItemsQueryGroup.groups -> ItemsQueryGroup).
@@ -300,7 +266,7 @@ def build_schema_from_object_args(args: list, type_map: dict) -> tuple:
         label = humanize(name)
         description = arg.get("description", "")
         default_value = arg.get("defaultValue")
-        actual_kind, actual_name, required = _extract_inner_type(arg["type"])
+        actual_kind, actual_name, required = extract_inner_type(arg["type"])
 
         if actual_kind == "ENUM":
             field = _build_enum_field(
@@ -311,10 +277,10 @@ def build_schema_from_object_args(args: list, type_map: dict) -> tuple:
                 name, label, description, actual_name, required, default_value
             )
         elif actual_kind == "LIST":
-            # _extract_inner_type discards the type dict; re-peel to get the LIST node
+            # extract_inner_type discards the type dict; re-peel to get the LIST node
             # so we can walk into its ofType and identify the element type.
-            unwrapped_type, _ = _unwrap_non_null_fully(arg["type"])
-            element_type, _ = _unwrap_non_null_fully(unwrapped_type.get("ofType") or {})
+            unwrapped_type, _ = unwrap_non_null_fully(arg["type"])
+            element_type, _ = unwrap_non_null_fully(unwrapped_type.get("ofType") or {})
             element_kind = element_type.get("kind")
             element_type_name = element_type.get("name")
             if element_kind == "INPUT_OBJECT":

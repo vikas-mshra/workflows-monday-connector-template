@@ -3,7 +3,7 @@ import re
 
 from workflows_cdk import ManagedError
 
-from ._schema_fields import _extract_inner_type, _unwrap_non_null_fully
+from src.utils.utils import extract_inner_type, unwrap_non_null_fully
 
 
 def _gql_type_string(type_info: dict) -> str:
@@ -45,7 +45,7 @@ def build_payload_for_monday(args: list, record: dict, index: int) -> tuple:
 
     for arg in args:
         name = arg["name"]
-        actual_kind, actual_name, required = _extract_inner_type(arg["type"])
+        actual_kind, actual_name, required = extract_inner_type(arg["type"])
         var_name = f"{name}_{index_suffix}"
         gql_type = _gql_type_string(arg["type"])
 
@@ -53,8 +53,8 @@ def build_payload_for_monday(args: list, record: dict, index: int) -> tuple:
             # Peel NON_NULL → LIST → inner NON_NULL to find the element kind. The
             # schema builder renders each LIST shape differently, so we have to
             # mirror that here to pull the values back out the right way.
-            list_type, _ = _unwrap_non_null_fully(arg["type"])
-            element_type, _ = _unwrap_non_null_fully(list_type.get("ofType") or {})
+            list_type, _ = unwrap_non_null_fully(arg["type"])
+            element_type, _ = unwrap_non_null_fully(list_type.get("ofType") or {})
             element_kind = element_type.get("kind")
             element_name = element_type.get("name")
 
@@ -168,7 +168,7 @@ def parameter_to_fetch_from_monday(return_type: dict, type_map: dict) -> str:
         would emit invalid GraphQL.
     """
     # Peel off NON_NULL wrapper to get to the actual type underneath.
-    unwrapped_return_type, _ = _unwrap_non_null_fully(return_type)
+    unwrapped_return_type, _ = unwrap_non_null_fully(return_type)
 
     kind = unwrapped_return_type.get("kind")
 
@@ -178,7 +178,7 @@ def parameter_to_fetch_from_monday(return_type: dict, type_map: dict) -> str:
 
     # For list return types, unwrap to the element type.
     if kind == "LIST":
-        inner, _ = _unwrap_non_null_fully(unwrapped_return_type.get("ofType") or {})
+        inner, _ = unwrap_non_null_fully(unwrapped_return_type.get("ofType") or {})
         if inner.get("kind") in ("SCALAR", "ENUM"):
             return ""
         unwrapped_return_type = inner
@@ -197,7 +197,7 @@ def parameter_to_fetch_from_monday(return_type: dict, type_map: dict) -> str:
         if any((arg.get("type") or {}).get("kind") == "NON_NULL" for arg in field_args):
             continue
 
-        field_type, _ = _unwrap_non_null_fully(field_definition["type"])
+        field_type, _ = unwrap_non_null_fully(field_definition["type"])
         field_kind = field_type.get("kind")
 
         if field_kind in ("SCALAR", "ENUM"):
@@ -215,7 +215,7 @@ def parameter_to_fetch_from_monday(return_type: dict, type_map: dict) -> str:
             parts.append(f"{field_definition['name']} {{ id }}")
         elif field_kind == "LIST":
             # Peel LIST and an optional inner NON_NULL to find the element kind.
-            element_type, _ = _unwrap_non_null_fully(field_type.get("ofType") or {})
+            element_type, _ = unwrap_non_null_fully(field_type.get("ofType") or {})
             element_kind = element_type.get("kind")
             if element_kind in ("SCALAR", "ENUM"):
                 parts.append(field_definition["name"])

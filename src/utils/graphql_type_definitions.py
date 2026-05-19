@@ -1,4 +1,4 @@
-from .query_executor import run_monday_query
+from src.monday_client import run_monday_query
 
 
 def get_type_definitions(token: str) -> dict:

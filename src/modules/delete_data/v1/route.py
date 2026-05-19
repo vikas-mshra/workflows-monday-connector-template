@@ -3,11 +3,14 @@ from pathlib import Path
 from flask import request as flask_request
 
 from main import router
-from src.monday_client import get_args_and_return_type, get_mutation_field_definitions
-from src.monday_content import build_content_response
-from src.monday_schema import humanize
-from src.utils.execute_runner import execute_batched_operation
-from src.utils.schema_loader import build_schema_response
+from src.utils.content_builder import build_content_data
+from src.utils.execute.execute_utils import execute_batched_operation
+from src.utils.graphql_type_definitions import (
+    get_args_and_return_type,
+    get_mutation_field_definitions,
+)
+from src.utils.schema.schema_builder import build_schema_response
+from src.utils.utils import humanize
 
 
 def _resolve_delete_operation(object_type: str, api_key: str) -> tuple:
@@ -25,7 +28,7 @@ def execute():
 
 @router.route("/content", methods=["GET", "POST"])
 def content():
-    return build_content_response(
+    return build_content_data(
         flask_request,
         lambda fields: [
             {
