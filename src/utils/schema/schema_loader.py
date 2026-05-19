@@ -1,6 +1,6 @@
 import json
 
-from src.utils.utils import extract_inner_type, humanize, unwrap_non_null_fully
+from src.utils.helper import extract_inner_type, humanize, unwrap_non_null_fully
 
 # Maps Monday.com GraphQL scalar type names to Stacksync field type strings.
 SCALAR_TYPE_MAP = {

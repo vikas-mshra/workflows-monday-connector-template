@@ -3,15 +3,12 @@ from pathlib import Path
 from flask import request as flask_request
 
 from main import router
-from src.utils.graphql_type_definitions import (
-    get_args_and_return_type,
-    get_type_definitions,
-)
 from src.utils.content_builder import build_content_data
 from src.utils.execute.execute_helper import parameter_to_fetch_from_monday
 from src.utils.execute.execute_utils import execute_batched_operation
+from src.utils.graphql_type_definitions import get_type_definitions
+from src.utils.helper import get_args_and_return_type, humanize
 from src.utils.schema.schema_builder import build_schema_response
-from src.utils.utils import humanize
 
 
 def _resolve_add_operation(object_type: str, api_key: str) -> tuple:

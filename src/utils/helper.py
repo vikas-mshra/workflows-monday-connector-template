@@ -47,3 +47,14 @@ def unwrap_non_null_fully(type_info: dict) -> tuple:
         required = True
         current_type = current_type.get("ofType") or {}
     return current_type, required
+
+
+def get_args_and_return_type(root_type: str, object_type: str, type_map: dict) -> dict:
+    """
+    Returns args and return_type for a named mutation/query by looking up the
+    pre-fetched type_map
+    """
+    for field in (type_map.get(root_type) or {}).get("fields") or []:
+        if field["name"] == object_type:
+            return {"args": field["args"], "return_type": field["type"]}
+    return {"args": [], "return_type": {"kind": "SCALAR", "name": None}}

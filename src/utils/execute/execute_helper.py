@@ -3,7 +3,7 @@ import re
 
 from workflows_cdk import ManagedError
 
-from src.utils.utils import extract_inner_type, unwrap_non_null_fully
+from src.utils.helper import extract_inner_type, unwrap_non_null_fully
 
 
 def _gql_type_string(type_info: dict) -> str:

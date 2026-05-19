@@ -1,4 +1,4 @@
-from src.monday_client import run_monday_query
+from src.utils.monday_graphql_connector import run_monday_query
 
 
 def get_type_definitions(token: str) -> dict:
@@ -39,17 +39,6 @@ def get_type_definitions(token: str) -> dict:
     """
     result = run_monday_query(query=query, token=token)
     return {t["name"]: t for t in result["data"]["__schema"]["types"] if t["name"]}
-
-
-def get_args_and_return_type(root_type: str, object_type: str, type_map: dict) -> dict:
-    """
-    Returns args and return_type for a named mutation/query by looking up the
-    pre-fetched type_map
-    """
-    for field in (type_map.get(root_type) or {}).get("fields") or []:
-        if field["name"] == object_type:
-            return {"args": field["args"], "return_type": field["type"]}
-    return {"args": [], "return_type": {"kind": "SCALAR", "name": None}}
 
 
 def get_mutation_field_definitions(token: str) -> dict:

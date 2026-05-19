@@ -1,4 +1,4 @@
-from src.monday_client import run_monday_query
+from src.utils.monday_graphql_connector import run_monday_query
 from workflows_cdk import ManagedError, Request, Response
 
 

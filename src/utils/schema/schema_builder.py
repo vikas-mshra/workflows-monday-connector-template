@@ -2,13 +2,9 @@ import json
 
 from workflows_cdk import ManagedError, Request, Response
 
-from src.utils.graphql_type_definitions import (
-    get_args_and_return_type,
-    get_type_definitions,
-)
-
+from src.utils.graphql_type_definitions import get_type_definitions
+from src.utils.helper import get_args_and_return_type, validate_object_type
 from src.utils.schema.schema_loader import build_schema_from_object_args
-from src.utils.utils import validate_object_type
 
 
 def build_schema_response(
