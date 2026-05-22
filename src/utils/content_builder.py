@@ -1,5 +1,10 @@
+import logging
+
+from src.utils.helper import get_credentials
 from src.utils.monday_graphql_connector import run_monday_query
 from workflows_cdk import ManagedError, Request, Response
+
+logger = logging.getLogger("monday.content_builder")
 
 
 def build_content_data(flask_request, filter_object_types, gql_root_type="Mutation"):
@@ -17,7 +22,6 @@ def build_content_data(flask_request, filter_object_types, gql_root_type="Mutati
         request = Request(flask_request)
         data = request.data
 
-        form_data = data.get("form_data", {})
         content_object_names = data.get("content_object_names", [])
 
         # content_object_names may arrive as a list of id-objects; flatten to plain strings
@@ -30,9 +34,24 @@ def build_content_data(flask_request, filter_object_types, gql_root_type="Mutati
                 obj.get("id") for obj in content_object_names if "id" in obj
             ]
 
-        api_key = form_data.get("api_key")
-        if not api_key:
-            raise ManagedError("Missing API key parameter")
+        try:
+            credentials = get_credentials(flask_request)
+        except ManagedError as e:
+            logger.warning(
+                "No credentials available for content request: %s",
+                e,
+                exc_info=True,
+            )
+            return Response(
+                data={
+                    "content_objects": [
+                        {"content_object_name": name, "data": []}
+                        for name in content_object_names
+                    ]
+                }
+            )
+
+        api_key = credentials.get("access_token")
 
         result = run_monday_query(
             query=f'{{ __type(name: "{gql_root_type}") {{ fields {{ name }} }} }}',
@@ -52,7 +71,11 @@ def build_content_data(flask_request, filter_object_types, gql_root_type="Mutati
 
         return Response(data={"content_objects": content_objects})
 
-    except ManagedError as e:
-        return Response.error(str(e))
+    except ManagedError:
+        raise
     except Exception as e:
-        return Response.error(str(e))
+        logger.exception("Unexpected content request error")
+        status_code = getattr(e, "status_code", 500)
+        raise ManagedError(
+            error="Failed to load content", status_code=status_code
+        ) from e

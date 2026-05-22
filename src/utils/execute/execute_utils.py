@@ -1,10 +1,13 @@
+import logging
 from typing import Callable, Optional
 
-from workflows_cdk import ManagedError, Request, Response
-
-from src.utils.monday_graphql_connector import run_monday_query
+from src.utils.content_builder import get_credentials
 from src.utils.execute.execute_helper import build_payload_for_monday
 from src.utils.helper import validate_object_type
+from src.utils.monday_graphql_connector import run_monday_query
+from workflows_cdk import ManagedError, Request, Response
+
+logger = logging.getLogger("monday.execute_utils")
 
 
 def execute_batched_operation(
@@ -40,18 +43,26 @@ def execute_batched_operation(
           "items". None drops list-shaped results — modules that never return
           lists don't need to set this.
     """
+    object_type = None
     try:
+        # Parse the incoming request using the CDK wrapper to normalise access to its data
         request = Request(flask_request)
         data = request.data
 
-        if not data:
-            raise ManagedError("Missing request parameters")
-        if not data.get("api_key"):
-            raise ManagedError("Missing API key parameter")
+        try:
+            credentials = get_credentials(flask_request)
+        except ManagedError as e:
+            logger.warning(
+                "No credentials available for executing the module: %s",
+                e,
+                exc_info=True,
+            )
+            raise
+
+        api_key = credentials.get("access_token")
+
         if not data.get("object_type"):
             raise ManagedError("Missing object type parameter")
-
-        api_key = data["api_key"]
         object_type = data["object_type"]
 
         validate_object_type(object_type)
@@ -115,7 +126,13 @@ def execute_batched_operation(
             data={"results": results},
             metadata={"affected_rows": len(results)},
         )
-    except ManagedError as e:
-        return Response.error(str(e))
+    except ManagedError:
+        raise
     except Exception as e:
-        return Response.error(str(e))
+        logger.exception(
+            "Unexpected request execution error for object_type: %s", object_type
+        )
+        status_code = getattr(e, "status_code", 500)
+        raise ManagedError(
+            error="Failed to execute request", status_code=status_code
+        ) from e

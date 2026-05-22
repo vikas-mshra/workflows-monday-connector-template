@@ -1,10 +1,13 @@
 import json
+import logging
 
-from workflows_cdk import ManagedError, Request, Response
-
+from src.utils.content_builder import get_credentials
 from src.utils.graphql_type_definitions import get_type_definitions
 from src.utils.helper import get_args_and_return_type, validate_object_type
 from src.utils.schema.schema_loader import build_schema_from_object_args
+from workflows_cdk import ManagedError, Request, Response
+
+logger = logging.getLogger("monday.schema_builder")
 
 
 def build_schema_response(
@@ -30,6 +33,7 @@ def build_schema_response(
         Response: A CDK Response containing {"schema": <schema dict>}, or an
                   error Response if something goes wrong.
     """
+    object_type = None
     try:
         # Load the static base schema that defines the fixed form fields
         with open(schema_path) as f:
@@ -39,9 +43,20 @@ def build_schema_response(
         request = Request(flask_request)
         data = request.data
 
+        try:
+            credentials = get_credentials(flask_request)
+        except ManagedError as e:
+            logger.warning(
+                "No credentials available for schema building: %s",
+                e,
+                exc_info=True,
+            )
+            return Response(data={"schema": base_schema})
+
+        api_key = credentials.get("access_token")
+
         # Extract user-submitted form values needed for dynamic schema generation
         form_data = data.get("form_data", {})
-        api_key = form_data.get("api_key")
         object_type = form_data.get("object_type")  # e.g. "item", "board", etc.
 
         # If either required value is missing, return the base schema as-is (no dynamic fields)
@@ -84,9 +99,14 @@ def build_schema_response(
 
         return Response(data={"schema": base_schema})
 
-    except ManagedError as e:
-        # ManagedErrors are expected domain errors (e.g. bad API key, invalid object type)
-        return Response.error(str(e))
+    except ManagedError:
+        raise
     except Exception as e:
-        # Catch-all for unexpected errors to avoid unhandled exceptions reaching the caller
-        return Response.error(str(e))
+        logger.exception(
+            "Unexpected schema building error for object_type=%s",
+            object_type,
+        )
+        status_code = getattr(e, "status_code", 500)
+        raise ManagedError(
+            error="Failed to build schema", status_code=status_code
+        ) from e

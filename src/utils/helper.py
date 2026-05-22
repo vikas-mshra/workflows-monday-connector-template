@@ -1,4 +1,5 @@
 import re
+from typing import Any, Dict
 
 from workflows_cdk import ManagedError
 
@@ -58,3 +59,29 @@ def get_args_and_return_type(root_type: str, object_type: str, type_map: dict) -
         if field["name"] == object_type:
             return {"args": field["args"], "return_type": field["type"]}
     return {"args": [], "return_type": {"kind": "SCALAR", "name": None}}
+
+
+def get_credentials(flask_req) -> Dict[str, Any]:
+    request_json = flask_req.json or {}
+
+    credentials = request_json.get("credentials", {})
+    if not credentials:
+        raise ManagedError(
+            error="Missing Monday CRM connection. Please configure your connection.",
+            status_code=401,
+        )
+
+    # Handle nested connection_data structure
+    if "connection_data" in credentials:
+        credentials = credentials["connection_data"].get(
+            "value", credentials["connection_data"]
+        )
+
+    # Validate required fields
+    if "access_token" not in credentials:
+        raise ManagedError(
+            error="Missing access_token in credentials. Please reconnect your Monday CRM account.",
+            status_code=401,
+        )
+
+    return credentials
