@@ -32,7 +32,7 @@ def _resolve_create_operation(object_type: str, api_key: str) -> tuple:
 def execute():
     """
     Executes batched create operations.
-    Loads credentials dynamically (supporting both OAuth2 access token and direct API keys)
+    Loads credentials dynamically (supporting OAuth2 access token)
     and maps the record fields to GraphQL variables for batch mutation.
     """
     logger.info("Executing create_data batch operation")
@@ -55,6 +55,7 @@ def content():
                 "value": f["name"],
                 "label": humanize(
                     f["name"].removeprefix("create_").removeprefix("or_get_")
+                    # to exclude create_or_get_tag option in the dropdown
                 ),
             }
             for f in fields
