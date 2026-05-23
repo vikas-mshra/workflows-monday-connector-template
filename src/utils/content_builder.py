@@ -54,7 +54,7 @@ def build_content_data(flask_request, filter_object_types, gql_root_type="Mutati
         api_key = credentials.get("access_token")
 
         result = run_monday_query(
-            query=f'{{ __type(name: "{gql_root_type}") {{ fields {{ name }} }} }}',
+            query=f'{{ __type(name: "{gql_root_type}") {{ fields {{ name args {{name}} }} }} }}',
             token=api_key,
         )
 

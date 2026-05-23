@@ -4,15 +4,6 @@
   },
   "fields": [
     {
-      "id": "api_key",
-      "type": "string",
-      "label": "API Key",
-      "description": "Your API key for authentication with Monday.com",
-      "validation": {
-        "required": true
-      }
-    },
-    {
       "id": "object_type",
       "type": "string",
       "label": "Object Type",

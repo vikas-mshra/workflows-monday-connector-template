@@ -1,9 +1,56 @@
 import json
 import re
-
-from workflows_cdk import ManagedError
+from typing import Optional
 
 from src.utils.helper import extract_inner_type, unwrap_non_null_fully
+from workflows_cdk import ManagedError
+
+
+def _get_object_selection(
+    field_name: str, type_name: str, type_map: dict
+) -> Optional[str]:
+    """
+    Builds the GraphQL selection block for an object type field.
+
+    If the object type has an 'id' field, it returns '{ field_name } { id }'.
+    Otherwise, for value objects lacking an 'id' (e.g. OutOfOffice, CustomFieldValue),
+    it dynamically queries all of its argument-free scalar and enum fields.
+    If no queryable scalar/enum fields exist, it returns None to exclude it.
+
+    Args:
+        field_name: The name of the field to select (e.g. 'out_of_office').
+        type_name: The name of the GraphQL Object Type (e.g. 'OutOfOffice').
+        type_map: Introspection type definitions dictionary.
+
+    Returns:
+        Optional[str]: The selection query string, or None if the field is skipped.
+    """
+    type_def = type_map.get(type_name)
+    if not type_def:
+        # If the type definition is missing from the map, skip the field to prevent query validation failures
+        return None
+
+    fields = type_def.get("fields") or []
+    has_id = any(f.get("name") == "id" for f in fields)
+
+    if has_id:
+        # Standard entities typically have a unique ID
+        return f"{field_name} {{ id }}"
+
+    # If the sub-object doesn't have an ID, query all its argument-free scalar/enum fields
+    sub_parts = []
+    for f in fields:
+        f_args = f.get("args") or []
+        # Skip fields requiring non-null arguments since we cannot pass arguments dynamically here
+        if any((arg.get("type") or {}).get("kind") == "NON_NULL" for arg in f_args):
+            continue
+        f_type, _ = unwrap_non_null_fully(f["type"])
+        if f_type.get("kind") in ("SCALAR", "ENUM"):
+            sub_parts.append(f["name"])
+
+    if sub_parts:
+        return f"{field_name} {{ {' '.join(sub_parts)} }}"
+    return None
 
 
 def _gql_type_string(type_info: dict) -> str:
@@ -204,15 +251,14 @@ def parameter_to_fetch_from_monday(return_type: dict, type_map: dict) -> str:
             # Plain value — select directly, e.g. "id", "name"
             parts.append(field_definition["name"])
         elif field_kind == "OBJECT":
-            # Only emit `id` for sub-objects. Monday.com entity types don't share
-            # a common human-readable field — Board/User use `name`, Group/View
-            # use `title`, Update uses `body`, ActivityLogType uses `event`, etc.
-            # — so any hardcoded label would break on at least one type. Pulling
-            # every scalar on every sub-object would generalize but bloats the
-            # response and risks Monday's complexity limits. `id` is universal and
-            # sufficient — callers who need details can fetch the sub-object with
-            # a follow-up request using the id.
-            parts.append(f"{field_definition['name']} {{ id }}")
+            # Select the appropriate sub-fields for the object.
+            # If the object has an 'id', we select only 'id' to save bandwidth and stay within complexity limits.
+            # If the object doesn't have an 'id' (e.g. value objects like OutOfOffice), we query its argument-free scalars.
+            selection = _get_object_selection(
+                field_definition["name"], field_type.get("name"), type_map
+            )
+            if selection:
+                parts.append(selection)
         elif field_kind == "LIST":
             # Peel LIST and an optional inner NON_NULL to find the element kind.
             element_type, _ = unwrap_non_null_fully(field_type.get("ofType") or {})
@@ -220,8 +266,13 @@ def parameter_to_fetch_from_monday(return_type: dict, type_map: dict) -> str:
             if element_kind in ("SCALAR", "ENUM"):
                 parts.append(field_definition["name"])
             elif element_kind == "OBJECT":
-                # Same rationale as the OBJECT branch — `id` only.
-                parts.append(f"{field_definition['name']} {{ id }}")
+                # Select the appropriate sub-fields for the objects in the list.
+                # If they have an 'id', select 'id'. Otherwise, select their argument-free scalars.
+                selection = _get_object_selection(
+                    field_definition["name"], element_type.get("name"), type_map
+                )
+                if selection:
+                    parts.append(selection)
             # Lists of INTERFACE / UNION are skipped — not used on Monday.com entity types.
 
     return ("{ " + " ".join(parts) + " }") if parts else "{ id }"

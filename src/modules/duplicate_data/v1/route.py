@@ -59,7 +59,9 @@ def content():
                 "label": humanize(f["name"].removeprefix("duplicate_")),
             }
             for f in fields
-            if f["name"].startswith("duplicate_")
+            if f["name"].startswith("duplicate_") and len(f["args"]) > 0
+            # Only include fields that accept arguments.
+            # Fields without arguments are excluded because this UI is intended for parameterized execution.
         ],
     )
 

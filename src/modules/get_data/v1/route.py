@@ -57,7 +57,12 @@ def content():
     return build_content_data(
         flask_request,
         lambda fields: [
-            {"value": f["name"], "label": humanize(f["name"])} for f in fields
+            {"value": f["name"], "label": humanize(f["name"])}
+            for f in fields
+            if len(f["args"]) > 0
+            # Only include fields that accept arguments.
+            # Fields without arguments (e.g. `account`) are excluded because
+            # this UI is intended for parameterized query execution.
         ],
         gql_root_type="Query",
     )

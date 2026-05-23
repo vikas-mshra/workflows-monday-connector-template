@@ -65,8 +65,11 @@ def content():
                 or f["name"].startswith("edit_")
                 or (f["name"].startswith("change_") and "column" in f["name"])
                 # to not include change_item_position and only include that starts with change_ and contains column in its mutation function name.
-                # TODO: Check if the last condition can be removed and change_item_position.
+                # TODO: Check if the last condition can be removed to include change_item_position as well.
             )
+            and len(f["args"]) > 0
+            # Only include fields that accept arguments.
+            # Fields without arguments are excluded because this UI is intended for parameterized execution.
         ],
     )
 

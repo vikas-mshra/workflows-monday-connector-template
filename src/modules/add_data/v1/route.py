@@ -61,8 +61,12 @@ def content():
                 "label": humanize(f["name"]),
             }
             for f in fields
-            if f["name"].startswith("add_") and not f["name"].startswith("add_file")
+            if f["name"].startswith("add_")
+            and not f["name"].startswith("add_file")
+            and len(f["args"]) > 0
             # we are not supporting file option as of now 22 May 2026
+            # Only include fields that accept arguments.
+            # Fields without arguments are excluded because this UI is intended for parameterized execution.
         ],
     )
 
